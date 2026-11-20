@@ -1,6 +1,6 @@
 ---
 document_type: "Tutorial Index — RP2350 Bare-Metal Rust"
-program: rustos (Raspberry Pi Pico 2 / RP2350)
+program: junoos (Raspberry Pi Pico 2 / RP2350)
 revision: C
 effective_date: 2026-08-29
 parent_index: docs/tutorials/
@@ -146,7 +146,7 @@ flash, a Winbond W25Q32RV (Pico 2 datasheet p4, p5).
 | 03 | [The RP2350 Memory Map](03_memory_map.md) | XIP/flash, SRAM banking, APB base addresses, why the four `MEMORY` numbers are what they are |
 | 04 | [The Linker Script](04_the_linker_script.md) | the annotated script, the exported symbol contract, the `ASSERT`s, stack accounting |
 | 05 | [Boot Metadata and the Vector Table](05_boot_and_vectors.md) | the `IMAGE_DEF` block, ARMv8-M vector layout, the Thumb bit, identical-handler folding, `lib.rs` so far (§5.9) |
-| 06 | [The Reset Handler](06_reset_handler.md) | FPU enable, VTOR, `.data` copy, `.bss` zero, the `entry!` macro and `__rustos_main`, `lib.rs` so far (§6.5) |
+| 06 | [The Reset Handler](06_reset_handler.md) | FPU enable, VTOR, `.data` copy, `.bss` zero, the `entry!` macro and `__junoos_main`, `lib.rs` so far (§6.5) |
 | 07 | [Registers, Bits, and Register Blocks](07_registers_and_bits.md) | `volatile`, read-modify-write versus plain write, no bitfields in Rust, `#[repr(C)]` register blocks, the atomic aliases, the `api` seam |
 | 08 | [First Blink](08_first_blink.md) | RESETS, the pad, the mux, the value; the bring-up order, the driver and its traits, the finished `demo`, flashing, the blink |
 | 09 | [GPIO Reference](09_gpio_reference.md) — **reference; skip on a first pass** | `GPIOn_CTRL` / `GPIOn_STATUS`, the pad bits and the isolation latch, the SIO offset map, releasing a pin |

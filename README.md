@@ -1,12 +1,12 @@
-# RustOS
+# JunoOS
 
-RustOS is an operating system designed from the ground up in Rust, living
+JunoOS is an operating system designed from the ground up in Rust, living
 entirely in the Rust ecosystem. The premise: mainstream operating systems
 carry decades of accumulated design constraints — C ABIs, unsafe-by-default
 interfaces, invariants enforced by convention and runtime checks because
 their languages could not express them. Rust was created on the principle of
 keeping the lessons of previous language generations while discarding their
-accumulated compromises; RustOS applies that same principle to the operating
+accumulated compromises; JunoOS applies that same principle to the operating
 system. Concretely: ownership and the type system move OS invariants
 to compile time wherever the language can express them — forging a pin
 handle, configuring the same pin twice, and writing an error branch for an
@@ -67,7 +67,7 @@ is a program you flash: an application is a separate binary crate, generated
 from `templates/`, that depends on both.
 
 ```
-rustos/
+junoos/
 ├── api/                 portable traits, ownership types and the app framework (library)
 ├── firmware/pico2/      RP2350 runtime + drivers (library)
 ├── templates/           cargo-generate templates: a Pico 2 application, and an app module
@@ -119,7 +119,7 @@ makes logic written against it testable without hardware.
   initial values of initialized global variables) from flash to RAM, and
   zero `.bss` (the section for zero-initialized globals);
 - the `entry!` macro, which an application uses to declare its `main` — the
-  macro emits the `__rustos_main` symbol the reset handler calls, and
+  macro emits the `__junoos_main` symbol the reset handler calls, and
   type-checks `main` against `fn() -> !` at compile time (`!` is the type of
   a function that never returns; on bare metal there is nothing to return
   to, so a `main` that could fall off the end is a type error); it can also
@@ -374,7 +374,7 @@ An application is built from its own crate. Generate one from the Pico 2
 template, then build it there:
 
 ```sh
-cargo generate --git https://github.com/robinonsay/rustos templates/pico2
+cargo generate --git https://github.com/robinonsay/junoos templates/pico2
 cd <project-name>
 cargo build --release
 ```
@@ -455,7 +455,7 @@ manuals, and the Pico C SDK and getting-started guides, with text
 extractions of each under `docs/extracted/`. The drivers cite them by
 section, table and page. `docs/` also holds the Pico 2 pinout, and the
 datasheets and specifications for the sensors, radio, GPS and SD card that
-applications built on RustOS drive.
+applications built on JunoOS drive.
 
 ## What is implemented
 

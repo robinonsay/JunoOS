@@ -2,10 +2,10 @@
 # is a sub-template under templates/, and templates/app is an application
 # module for an existing crate; running plain
 #
-#   cargo generate --git https://github.com/robinonsay/rustos
+#   cargo generate --git https://github.com/robinonsay/junoos
 #
 # prompts for which template, or pick one directly:
 #
-#   cargo generate --git https://github.com/robinonsay/rustos templates/pico2
+#   cargo generate --git https://github.com/robinonsay/junoos templates/pico2
 [template]
 sub_templates = ["templates/pico2", "templates/app"]

@@ -1,7 +1,7 @@
 # Application templates
 
 One sub-template per supported board. Each generates a standalone,
-ready-to-flash application that consumes RustOS as a git dependency and
+ready-to-flash application that consumes JunoOS as a git dependency and
 carries the board's build environment (`.cargo/config.toml` with the
 target triple, linker flags, and flash runner).
 
@@ -10,10 +10,10 @@ Requires [cargo-generate](https://github.com/cargo-generate/cargo-generate)
 
 ```sh
 # Pick a template interactively:
-cargo generate --git https://github.com/robinonsay/rustos
+cargo generate --git https://github.com/robinonsay/junoos
 
 # Or name one directly:
-cargo generate --git https://github.com/robinonsay/rustos templates/pico2
+cargo generate --git https://github.com/robinonsay/junoos templates/pico2
 ```
 
 Then, from the generated project:
@@ -34,7 +34,7 @@ existing crate (see [Application modules](#application-modules)).
 A template's manifest is `Cargo.toml.liquid`, never `Cargo.toml`: cargo
 reads every `Cargo.toml` in a git dependency's repository, so a template's
 `name = "{{project-name}}"` would put an error in the build output of every
-crate that depends on RustOS. cargo-generate removes the `.liquid` suffix
+crate that depends on JunoOS. cargo-generate removes the `.liquid` suffix
 when it generates the app.
 
 ## Application modules
@@ -50,13 +50,13 @@ the same layout every app has:
 | `table.rs` | Its iLoad: its schedule slot and every value it is configured with, checked at compile time |
 
 Generate it in the directory that holds the crate's apps (below, a crate at
-`flight/` beside a RustOS checkout at `deps/rustos`). Pass `--force`
+`flight/` beside a JunoOS checkout at `deps/junoos`). Pass `--force`
 so cargo-generate keeps a snake_case name instead of changing it to
 kebab-case, which is not a valid module name:
 
 ```sh
 cd flight/src/apps
-cargo generate --path ../../../deps/rustos templates/app --name air_data --force \
+cargo generate --path ../../../deps/junoos templates/app --name air_data --force \
     --define summary="Air data from the pitot tube"
 ```
 
@@ -80,14 +80,14 @@ The generated app depends only on `api`: its schedule slot is an
 `api::iload::Slot`, checked at compile time with `api::iload::assert_ok`,
 and its health is an `api::app::Health`.
 
-## Co-developing an app and RustOS
+## Co-developing an app and JunoOS
 
-Applications generated from a board template track RustOS's default
+Applications generated from a board template track JunoOS's default
 branch on GitHub. To build against a
 local checkout instead, add a patch section to the app's `Cargo.toml`:
 
 ```toml
-[patch."https://github.com/robinonsay/rustos"]
-api   = { path = "../rustos/api" }
-pico2 = { path = "../rustos/firmware/pico2" }
+[patch."https://github.com/robinonsay/junoos"]
+api   = { path = "../junoos/api" }
+pico2 = { path = "../junoos/firmware/pico2" }
 ```

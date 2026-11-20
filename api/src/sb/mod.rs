@@ -10,7 +10,7 @@
 //! This is the Rust form of LibJuno's software bus
 //! (`juno/sb/broker_api.h`, `juno/sb/broker_api.hpp`, `src/juno_broker.c`):
 //!
-//! | rustos | LibJuno | What |
+//! | junoos | LibJuno | What |
 //! |--------|---------|------|
 //! | [`Mid`] | `JUNO_SB_MID_T` | message id, `u32` |
 //! | [`Pipe`] | `JUNO_SB_PIPE_T` / `PIPE_ROOT_T` | a FIFO tagged with one [`Mid`] |

@@ -1,6 +1,6 @@
 ---
 document_type: "Tutorial Chapter — Linker Scripts"
-program: rustos (Raspberry Pi Pico 2 / RP2350)
+program: junoos (Raspberry Pi Pico 2 / RP2350)
 chapter: 2 of 9
 revision: B
 effective_date: 2026-08-28

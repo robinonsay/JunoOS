@@ -1,6 +1,6 @@
 ---
 document_type: "Tutorial Chapter — Toolchain and Workspace"
-program: rustos (Raspberry Pi Pico 2 / RP2350)
+program: junoos (Raspberry Pi Pico 2 / RP2350)
 chapter: 1 of 9
 revision: C
 effective_date: 2026-08-29
@@ -424,12 +424,12 @@ linker stdout through the warning channel, and it lands on `demo` because
 `-C` is the short form of `--demangle`, and every disassembly listing in this
 tutorial was taken with it. Without it, a Rust function prints under its mangled
 symbol. The instruction below is the runtime handing control to the
-application — chapter 06 explains the `__rustos_main` symbol it lives in:
+application — chapter 06 explains the `__junoos_main` symbol it lives in:
 
 ```
-$ llvm-objdump -d --no-show-raw-insn --disassemble-symbols=__rustos_main <elf> | tail -1
+$ llvm-objdump -d --no-show-raw-insn --disassemble-symbols=__junoos_main <elf> | tail -1
 100002d0:      	bl	0x10000124 <_RNvCsgEed0wyhMeN_4demo4main>
-$ llvm-objdump -d -C --no-show-raw-insn --disassemble-symbols=__rustos_main <elf> | tail -1
+$ llvm-objdump -d -C --no-show-raw-insn --disassemble-symbols=__junoos_main <elf> | tail -1
 100002d0:      	bl	0x10000124 <demo::main>
 ```
 
@@ -437,7 +437,7 @@ The hash in the middle (`CsgEed…`) is the crate disambiguator; it is not stabl
 across toolchains or across a `Cargo.toml` edit, so do not match on it.
 
 The image ends up holding both kinds of name, and the difference is `no_mangle`.
-`OnReset`, `DefaultHandler`, `OnHardFault` (chapter 05) and `__rustos_main`
+`OnReset`, `DefaultHandler`, `OnHardFault` (chapter 05) and `__junoos_main`
 (chapter 06) carry `#[unsafe(no_mangle)]` because the linker script, the vector
 table, or another crate has to name them from outside normal Rust name
 resolution, so their symbols *are* their source names. `demo::main` and

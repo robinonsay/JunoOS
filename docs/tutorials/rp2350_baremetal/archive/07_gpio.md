@@ -1,6 +1,6 @@
 ---
 document_type: Tutorial Chapter — GPIO and IO_BANK0
-program: rustos (Raspberry Pi Pico 2 / RP2350)
+program: junoos (Raspberry Pi Pico 2 / RP2350)
 chapter: 7 of 7
 revision: B
 effective_date: 2026-08-25

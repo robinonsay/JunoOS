@@ -1,6 +1,6 @@
 ---
 document_type: Tutorial Chapter — The RP2350 Memory Map
-program: rustos (Raspberry Pi Pico 2 / RP2350)
+program: junoos (Raspberry Pi Pico 2 / RP2350)
 chapter: 2 of 7
 revision: A
 effective_date: 2026-08-25

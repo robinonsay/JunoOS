@@ -1,6 +1,6 @@
 ---
 document_type: "Tutorial Chapter — The Reset Handler"
-program: rustos (Raspberry Pi Pico 2 / RP2350)
+program: junoos (Raspberry Pi Pico 2 / RP2350)
 chapter: 6 of 9
 revision: C
 effective_date: 2026-08-29
@@ -18,7 +18,7 @@ From that instruction on, nothing is set up for you. Everything a hosted
 program's runtime would have done before `main` now happens in one function,
 written by hand, in the order the hardware requires — and this chapter also
 builds the bridge that function crosses to reach the application: the
-`entry!` macro and the `__rustos_main` symbol.
+`entry!` macro and the `__junoos_main` symbol.
 
 ## 6.1 What it must do, in order
 
@@ -32,7 +32,7 @@ pub extern "C" fn OnReset() -> ! {
         reset_vtor();
         reset_data();
         reset_bss();
-        __rustos_main()
+        __junoos_main()
     }
 }
 ```
@@ -48,7 +48,7 @@ Four setup steps, then the application. The order is not arbitrary:
 
 `-> !` is not decoration. The hardware enters this function by loading its
 address into the PC — there is no caller and no return address, so if it returns
-the CPU pops garbage into the PC. The last expression, `__rustos_main()`, is a
+the CPU pops garbage into the PC. The last expression, `__junoos_main()`, is a
 call to a function that is itself declared `-> !` (§6.4.4), so there is no
 trailing `loop {}`: "the application never returns" is enforced by the type
 system rather than by a fallback. All four helpers are `#[inline]`: in
@@ -324,7 +324,7 @@ bare metal because `compiler_builtins` supplies `__aeabi_memcpy4` and
 **elements** (`u32`), which is why both divide by 4; the `ALIGN(4)` on `.data`
 and `.bss` in the linker script makes that division exact.
 
-### 6.4.4 The way out: `entry!` and `__rustos_main`
+### 6.4.4 The way out: `entry!` and `__junoos_main`
 
 `OnReset` ends by calling the application — and the application lives in a
 different crate, `demo`, which this library cannot name: `pico2` must not
@@ -339,7 +339,7 @@ library declares the symbol without defining it, verbatim from `lib.rs`:
 // property that the linker matches on name alone; see `entry!` for how the
 // signature is nonetheless checked.
 unsafe extern "Rust" {
-    fn __rustos_main() -> !;
+    fn __junoos_main() -> !;
 }
 ```
 
@@ -347,8 +347,8 @@ An `extern` block is a *declaration*: it tells the compiler "a function of
 this name and signature will exist at link time", and the linker later
 resolves the name against whatever object file defines it. That is exactly how
 C crosses file boundaries, and it carries C's defect: **the declaration is not
-checked against the definition.** Declare `fn __rustos_main() -> !` here,
-define `fn __rustos_main(x: u32) -> u32` over there, and the linker happily
+checked against the definition.** Declare `fn __junoos_main() -> !` here,
+define `fn __junoos_main(x: u32) -> u32` over there, and the linker happily
 matches them on name; at runtime the callee reads an argument nobody passed.
 
 The definition comes from the application, through a macro the library
@@ -359,7 +359,7 @@ exports — verbatim from `lib.rs`, tree comment included:
 macro_rules! entry {
     ($f:path) => {
         #[unsafe(no_mangle)]
-        pub extern "Rust" fn __rustos_main() -> ! {
+        pub extern "Rust" fn __junoos_main() -> ! {
             // Type check: rejects any signature other than fn() -> !.
             let f: fn() -> ! = $f;
             f()
@@ -368,7 +368,7 @@ macro_rules! entry {
 }
 ```
 
-Expanded in the application, `entry!(main)` defines the real `__rustos_main`:
+Expanded in the application, `entry!(main)` defines the real `__junoos_main`:
 a shim that calls whatever function you named. The one line doing the safety
 work is the coercion:
 
@@ -424,7 +424,7 @@ error[E0308]: mismatched types
 
 That is the C defect surfacing as a compile error instead of a runtime
 mystery: `main` must diverge because `OnReset` diverges, and the chain of
-`-> !` from `main` through `__rustos_main` to `OnReset` is checked end to end.
+`-> !` from `main` through `__junoos_main` to `OnReset` is checked end to end.
 
 ## 6.5 The file so far, and what it compiles to
 
@@ -520,14 +520,14 @@ unsafe fn reset_bss() {
 }
 
 unsafe extern "Rust" {
-    fn __rustos_main() -> !;
+    fn __junoos_main() -> !;
 }
 
 #[macro_export]
 macro_rules! entry {
     ($f:path) => {
         #[unsafe(no_mangle)]
-        pub extern "Rust" fn __rustos_main() -> ! {
+        pub extern "Rust" fn __junoos_main() -> ! {
             // Type check: rejects any signature other than fn() -> !.
             let f: fn() -> ! = $f;
             f()
@@ -542,7 +542,7 @@ pub extern "C" fn OnReset() -> ! {
         reset_vtor();
         reset_data();
         reset_bss();
-        __rustos_main()
+        __junoos_main()
     }
 }
 
@@ -623,7 +623,7 @@ llvm-objdump -d -C --no-show-raw-insn --disassemble-symbols=OnReset \
 1000018a:      	movt	r0, #0x2000
 1000018e:      	subs	r1, r1, r0
 10000190:      	bl	0x10000198 <__aeabi_memclr4>
-10000194:      	bl	0x10000124 <__rustos_main>
+10000194:      	bl	0x10000124 <__junoos_main>
 ```
 
 Read that against the calls in §6.1: all four helpers are inlined, and there is
@@ -666,7 +666,7 @@ also what LLVM did with the `/ 4`: there is no `lsr` anywhere. It cancelled the
 division against `memcpy`'s element scaling and passes a byte count straight
 through.
 
-The last instruction is the handoff: `bl 0x10000124 <__rustos_main>` — the
+The last instruction is the handoff: `bl 0x10000124 <__junoos_main>` — the
 shim `entry!` expanded to in `demo`, which in this staged build is an inlined
 `loop {}` three instructions long.
 
@@ -685,7 +685,7 @@ instructions with different operands:
 | `__aeabi_memcpy4` | `0x10000246` | `0x10001910` |
 | `__aeabi_memclr4` | `0x10000198` | `0x100015cc` |
 | `.bss` count materialisation | `movw r1, #0x0` | `movw r1, #0x4` |
-| last instruction | `bl <__rustos_main>` | `bl <__rustos_main>` |
+| last instruction | `bl <__junoos_main>` | `bl <__junoos_main>` |
 
 `__sidata` is `LOADADDR(.data)`, which sits immediately after `.rodata`, which
 sits immediately after `.text` — so it moves when `.text` and `.rodata` grow.

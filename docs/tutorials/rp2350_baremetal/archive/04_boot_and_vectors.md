@@ -1,6 +1,6 @@
 ---
 document_type: Tutorial Chapter — Boot Metadata and the Vector Table
-program: rustos (Raspberry Pi Pico 2 / RP2350)
+program: junoos (Raspberry Pi Pico 2 / RP2350)
 chapter: 4 of 7
 revision: A
 effective_date: 2026-08-25

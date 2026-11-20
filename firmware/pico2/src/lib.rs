@@ -344,8 +344,8 @@ unsafe fn reset_bss() {
 // property that the linker matches on name alone; see `entry!` for how the
 // signature is nonetheless checked.
 unsafe extern "Rust" {
-    fn __rustos_main() -> !;
-    fn __rustos_safe_state();
+    fn __junoos_main() -> !;
+    fn __junoos_safe_state();
 }
 
 /// Declare the application entry point: a function of type `fn() -> !`.
@@ -366,7 +366,7 @@ unsafe extern "Rust" {
 ///
 /// The naive way to do that is a bare `extern` block, which is what C does and
 /// carries C's defect: **extern declarations are not type-checked across the
-/// link.** Declare `fn __rustos_main()`, define it as `fn __rustos_main(x: u32)
+/// link.** Declare `fn __junoos_main()`, define it as `fn __junoos_main(x: u32)
 /// -> u32`, and the linker matches them on name alone; at runtime the callee
 /// reads an argument nobody passed.
 ///
@@ -411,14 +411,14 @@ macro_rules! entry {
     };
     ($f:path, safe_state = $s:path) => {
         #[unsafe(no_mangle)]
-        pub extern "Rust" fn __rustos_main() -> ! {
+        pub extern "Rust" fn __junoos_main() -> ! {
             // Type check: rejects any signature other than fn() -> !.
             let f: fn() -> ! = $f;
             f()
         }
 
         #[unsafe(no_mangle)]
-        pub extern "Rust" fn __rustos_safe_state() {
+        pub extern "Rust" fn __junoos_safe_state() {
             // Type check, as above: fn().
             let s: fn() = $s;
             s()
@@ -452,7 +452,7 @@ pub extern "C" fn OnReset() -> ! {
         reset_vtor();
         reset_data();
         reset_bss();
-        __rustos_main()
+        __junoos_main()
     }
 }
 
@@ -464,7 +464,7 @@ pub extern "C" fn OnReset() -> ! {
 /// Every slot in `VECTOR_TABLE` starts out pointing here.
 #[unsafe(no_mangle)]
 pub extern "C" fn DefaultHandler() {
-    unsafe { __rustos_safe_state() };
+    unsafe { __junoos_safe_state() };
     loop {
         core::hint::spin_loop();
     }
@@ -478,7 +478,7 @@ pub extern "C" fn DefaultHandler() {
 /// safe state first, as [`DefaultHandler`] does, then spins.
 #[unsafe(no_mangle)]
 pub extern "C" fn OnHardFault() {
-    unsafe { __rustos_safe_state() };
+    unsafe { __junoos_safe_state() };
     loop {
         core::hint::spin_loop();
     }

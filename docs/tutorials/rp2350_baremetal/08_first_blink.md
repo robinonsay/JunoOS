@@ -1,6 +1,6 @@
 ---
 document_type: "Tutorial Chapter — First Blink"
-program: rustos (Raspberry Pi Pico 2 / RP2350)
+program: junoos (Raspberry Pi Pico 2 / RP2350)
 chapter: 8 of 9
 revision: C
 effective_date: 2026-08-29

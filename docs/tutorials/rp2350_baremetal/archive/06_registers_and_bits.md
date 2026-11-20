@@ -1,6 +1,6 @@
 ---
 document_type: Tutorial Chapter — Registers and Bit Manipulation
-program: rustos (Raspberry Pi Pico 2 / RP2350)
+program: junoos (Raspberry Pi Pico 2 / RP2350)
 chapter: 6 of 7
 revision: A
 effective_date: 2026-08-25
