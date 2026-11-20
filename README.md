@@ -187,7 +187,7 @@ its configuration table) inside an existing crate.
 
 ## Applications, scheduling and messaging
 
-The rest of `api` is a small flight-software framework, the Rust form of
+The rest of `api` is a small embedded  software framework, the Rust form of
 LibJuno's application, scheduler and software-bus APIs. Each module's
 rustdoc gives the detail; those of `app`, `sch`, `sb` and `time` also
 give the mapping to LibJuno.
