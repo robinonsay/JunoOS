@@ -26,11 +26,11 @@
 //! [`Gpio::input_from_handle`] / [`Gpio::output_from_handle`].
 //!
 //! A complete runnable program — including the `#![no_std]`/`#![no_main]`
-//! attributes, the `entry!` declaration, and a delay loop — is the demo crate
-//! (`demo/src/main.rs`). One rule it demonstrates that nothing else here
-//! states: a trait method such as [`Write::write`] is only callable when the
-//! trait itself is imported (`use api::common::Write;`), because Rust resolves
-//! method calls only through traits in scope.
+//! attributes, the `entry!` declaration, and a delay loop — is the blinky
+//! template (`templates/pico2/src/main.rs`). One rule it demonstrates that
+//! nothing else here states: a trait method such as [`Write::write`] is only
+//! callable when the trait itself is imported (`use api::common::Write;`),
+//! because Rust resolves method calls only through traits in scope.
 
 use core::fmt::Debug;
 
@@ -268,10 +268,7 @@ impl<const N: usize> Rp2350GpioIn<N> {
 /// branch is eliminated at compile time. This is honest rather than
 /// optimistic — every failure mode was excluded before construction, when
 /// possession of the [`PinHandle`] established that pin `N` exists on this
-/// package. A pin that exists cannot fail to be written. (One caveat,
-/// inherited from the [`Rp2350Gpio`] struct-literal hole documented there: a
-/// pin configured through a literal-constructed port may act on GPIO blocks
-/// still held in reset, and such a pin silently does nothing.)
+/// package. A pin that exists cannot fail to be written.
 impl<const N: usize> ErrorType for Rp2350GpioOut<N> {
     type Error = core::convert::Infallible;
 }
@@ -314,7 +311,8 @@ impl<const N: usize> Read<bool> for Rp2350GpioIn<N> {
     /// pin is really at. On an output pin those differ whenever external
     /// circuitry sets the pad's level despite the driver — a short to ground,
     /// or a load drawing more current than the configured `DRIVE` strength
-    /// can supply — which makes this the cheapest fault detection available.
+    /// can supply. This driver implements `Read` only for input pins, so an
+    /// output pin cannot be read back through it.
     ///
     /// Requires `IE` to be set in the pad register. With the input buffer
     /// disabled this returns `false` regardless of the voltage on the leg,
@@ -357,10 +355,10 @@ impl<const N: usize> Rp2350GpioIn<N> {
     }
 }
 
-/// Edges latched in the raw `INTR` registers of `IO_BANK0` (§9.5). The pad's
-/// input buffer is on (see [`configure_gpio_pin_in`]), which edge detection
-/// needs. An edge latched before the pin was configured may still be
-/// there: the first call can report it.
+/// Edges latched in the raw `INTR` registers of `IO_BANK0` (§9.5). Input
+/// configuration sets the pad's `IE` bit, so the input buffer is on, which
+/// edge detection needs. An edge latched before the pin was configured may
+/// still be there: the first call can report it.
 impl<const N: usize> EdgeLatch for Rp2350GpioIn<N> {
     fn take_rising(&mut self) -> bool {
         Self::take_edge(EDGE_HIGH)
@@ -392,8 +390,10 @@ impl<const N: usize> GpioPinOut<N> for Rp2350GpioOut<N> {}
 ///
 /// # Safety
 ///
-/// `pin` must be `< MAX_GPIO_PIN`. Larger values index past the pad array
-/// (a bounds panic) or overflow the shift (silently masked in release builds).
+/// `pin` must be `< MAX_GPIO_PIN`. Values of 32 or more overflow the
+/// `1 << pin` shift (a panic in debug builds, silently masked in release
+/// builds); values of 48 or more also index past the pad array (a bounds
+/// panic).
 /// Callers reach this only through the pin constructors, whose `N` came from
 /// a [`PinHandle`] and is therefore a pin the board actually has.
 unsafe fn configure_gpio_pin_in(pin: usize, pull: Pull) {
@@ -462,7 +462,8 @@ unsafe fn configure_gpio_pin_in(pin: usize, pull: Pull) {
 ///
 /// `IE` is set here too, even though this is an output. That is deliberate and
 /// matches what the SDK's `gpio_set_function` does: it enables the input
-/// buffer so [`Read::read`] can report the level actually on the pad.
+/// buffer so `GPIO_IN` reports the level actually on the pad. (No driver
+/// method reads it back; [`Rp2350GpioOut`] implements only [`Write`].)
 ///
 /// # Safety
 ///

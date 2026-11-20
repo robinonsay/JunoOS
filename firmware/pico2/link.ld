@@ -165,8 +165,11 @@ SECTIONS
     } > RAM
 
     /* Stack reservation. The REAL stack grows DOWN from _stack_top at the top
-     * of RAM; this books the same number of bytes at the bottom purely so the
-     * linker's region check and --print-memory-usage both account for it.
+     * of RAM. That is core 0's stack; core 1, once started, runs on a static
+     * Core1Stack the application passes to Rp2350Core1::launch (multicore.rs),
+     * which, being zero-initialised, lands in .bss. This books the same number
+     * of bytes after .bss purely so the linker's region check and
+     * --print-memory-usage both account for it.
      * Without it, .bss can grow to 99% of RAM and still link clean. */
     /* ALIGN(8): AAPCS — the Procedure Call Standard for the Arm Architecture,
      * Arm's rules for how compiled functions call each other — requires the

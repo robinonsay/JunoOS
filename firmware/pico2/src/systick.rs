@@ -89,6 +89,10 @@ const _: () = assert!(CYCLES_PER_MS < CYCLES_MASK);
 
 /// The SysTick counter of the calling core, counting `clk_sys` cycles. See
 /// the [module documentation](self).
+///
+/// [`new`](Self::new) starts, and [`cycles`](Self::cycles) reads, the
+/// SysTick of whichever core calls it, so use both on the same core: on
+/// the other core `cycles` reads a counter `new` never started.
 pub struct Rp2350SysTick {
     _private: (),
 }

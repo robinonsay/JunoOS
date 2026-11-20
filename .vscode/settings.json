@@ -1,8 +1,10 @@
 {
-  // The workspace defaults to thumbv8m.main-none-eabihf (see .cargo/config.toml).
+  // This workspace sets no default target, but an enclosing application's
+  // .cargo/config.toml may set thumbv8m.main-none-eabihf (see .cargo/config.toml).
   // rust-analyzer's flycheck passes --all-targets by default, which builds the
   // test harness -- and libtest doesn't exist for a bare-metal target, giving a
   // bogus "can't find crate for `test`" on every #[cfg(test)] block.
-  // Tests are run on the host instead, via `cargo xtest`.
+  // Tests are run on the host instead: `cargo test -p api`, with
+  // --target <host triple> if a default target is set.
   "rust-analyzer.check.allTargets": false
 }

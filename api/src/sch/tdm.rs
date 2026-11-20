@@ -6,7 +6,7 @@
 //! columns says which apps run in that frame, in column order. Each frame
 //! runs its row and then sleeps until the frame's end; the next frame
 //! starts there. This is LibJuno's `SCH_ROOT_T<NAppsPerFrame, NFrames>`,
-//! with three differences:
+//! with five differences:
 //!
 //! * **Apps are stored once, and the table holds indices.** Each of the
 //!   table's `SLOTS × FRAMES` slots holds an index into an app array of
@@ -32,10 +32,11 @@
 //!   places an app whose `on_process` takes longer than a minor frame: it
 //!   is started in the first frame of its run, and its slot is reserved in
 //!   the frames after, where it is not started again. A frame that ends
-//!   late is not an overrun while the next frame is reserved for a run
-//!   still going; the last reserved frame ending late is one, put down to
-//!   that app. Apps are not preempted: the others in those frames run
-//!   once it returns.
+//!   late is not an overrun while the next frame is reserved for a run,
+//!   whichever app's; the last reserved frame ending late is one, put down to
+//!   that app unless an app started in that frame ran longer than the run
+//!   spilled into it. Apps are not preempted: the others in those frames
+//!   run once it returns.
 //!
 //! What is the same: frames are paced to **absolute** deadlines (start +
 //! (i + 1) × minor), so one late frame does not delay the rest; a failing
@@ -95,8 +96,8 @@ pub enum SchConfigError {
         /// The minor frame given.
         minor_frame: usize,
     },
-    /// Every frame this registration selects is a catch-up frame
-    /// ([`TdmSchBuilder::keep_free`]), so the app would never run.
+    /// Every run this registration selects starts in or spans a catch-up
+    /// frame ([`TdmSchBuilder::keep_free`]), so the app would never run.
     OnlyFreeFrames,
     /// [`TdmSchBuilder::register_span`]: the run is no frames long, or
     /// does not end within the period it starts in.
@@ -143,8 +144,10 @@ impl Slot {
 }
 
 /// The schedule being built, before it runs. Make one with
-/// [`new`](Self::new), place apps with [`register`](Self::register), and
-/// turn it into a [`TdmSch`] with [`build`](Self::build).
+/// [`new`](Self::new), mark catch-up frames with
+/// [`keep_free`](Self::keep_free), place apps with
+/// [`register`](Self::register) or [`register_span`](Self::register_span),
+/// and turn it into a [`TdmSch`] with [`build`](Self::build).
 ///
 /// Type parameters: `C` the clock that paces frames; `L` the [`SchLog`];
 /// `SLOTS` apps per minor frame; `FRAMES` minor frames per major frame;
@@ -168,8 +171,8 @@ impl<'a, C: Sleep, L: SchLog, const SLOTS: usize, const FRAMES: usize, const APP
     TdmSchBuilder<'a, C, L, SLOTS, FRAMES, APPS>
 {
     /// The table dimensions and app count fit the representation: at least
-    /// one slot and one frame (LibJuno's two `static_assert`s), and every
-    /// app index a `u8`.
+    /// one slot and one frame (LibJuno's two `static_assert`s), every
+    /// app index a `u8`, and the frame count a `u32`.
     const SHAPE_OK: () = {
         assert!(SLOTS > 0, "a minor frame needs at least one slot");
         assert!(FRAMES > 0, "a major frame needs at least one minor frame");
@@ -179,6 +182,11 @@ impl<'a, C: Sleep, L: SchLog, const SLOTS: usize, const FRAMES: usize, const APP
 
     /// An empty schedule of `FRAMES` minor frames of `minor_frame` each,
     /// for `apps`, paced by `clock` and logging to `log`.
+    ///
+    /// [`SchConfigError::ZeroMinorFrame`] if `minor_frame` is zero, and
+    /// [`SchConfigError::MajorFrameTooLong`] if `minor_frame × FRAMES`
+    /// does not fit a [`Duration`]. `SLOTS` or `FRAMES` of 0, more than
+    /// 256 apps, or more than `u32::MAX` frames fail the build instead.
     pub fn new(
         clock: &'a C,
         minor_frame: Duration,
@@ -205,13 +213,16 @@ impl<'a, C: Sleep, L: SchLog, const SLOTS: usize, const FRAMES: usize, const APP
     /// polled each frame, an input timed by when it is looked at) and the
     /// cheapest; everything else stays out, so if earlier frames overran,
     /// the schedule has most of a frame of slack to get back onto its
-    /// deadlines before the next major frame starts. Every app still runs
-    /// as often as its period says. A run of several frames
-    /// ([`register_span`](Self::register_span)) is skipped if any of its
-    /// frames is this one.
+    /// deadlines before the next major frame starts. An app that does not
+    /// run every frame loses the run that would fall in this frame, so it
+    /// runs that much less often than its period says. A run of several
+    /// frames ([`register_span`](Self::register_span)) is skipped if any of
+    /// its frames is this one.
     ///
     /// Call it before registering: [`SchConfigError::FrameInUse`] if an app
-    /// is already in the frame.
+    /// is already in the frame (started or reserved there), and
+    /// [`SchConfigError::NoSuchFrame`] if `minor_frame` is not below
+    /// `FRAMES`.
     pub fn keep_free(&mut self, minor_frame: usize) -> Result<(), SchConfigError> {
         // The frame must exist and be empty.
         let row = self.table.get(minor_frame).ok_or(SchConfigError::NoSuchFrame { minor_frame })?;
@@ -233,7 +244,13 @@ impl<'a, C: Sleep, L: SchLog, const SLOTS: usize, const FRAMES: usize, const APP
     /// shorter than `period`. Frames kept free
     /// ([`keep_free`](Self::keep_free)) are skipped. All of the frames it
     /// selects are checked before any is written, so an error leaves the
-    /// table as it was.
+    /// table as it was. The errors are [`SchConfigError::NoSuchApp`],
+    /// [`PeriodNotMultipleOfMinorFrame`](SchConfigError::PeriodNotMultipleOfMinorFrame),
+    /// [`PeriodDoesNotDivideMajorFrame`](SchConfigError::PeriodDoesNotDivideMajorFrame),
+    /// [`InvalidOffset`](SchConfigError::InvalidOffset),
+    /// [`OnlyFreeFrames`](SchConfigError::OnlyFreeFrames),
+    /// [`AlreadyScheduled`](SchConfigError::AlreadyScheduled) and
+    /// [`FrameFull`](SchConfigError::FrameFull).
     pub fn register(&mut self, app: usize, period: Duration, offset: Duration) -> Result<(), SchConfigError> {
         // A run of one frame reserves nothing after it.
         self.register_span(app, period, offset, 1)
@@ -350,7 +367,7 @@ impl<'a, C: Sleep, L: SchLog, const SLOTS: usize, const FRAMES: usize, const APP
 /// 21 474 836.48 units, stored as 21 474 836 — so `25 ms` is not exactly
 /// `5 × 5 ms` (107 374 182 units against 107 374 180). Each conversion
 /// truncates by less than one unit, so for `n` frames the true multiple
-/// and `span` differ by less than `n + 1` units; anything closer than that
+/// and `span` differ by less than `n + 1` units; anything within that
 /// counts as `n` frames. A genuine mismatch is far larger: 7 ms against
 /// 5 ms frames is off by millions of units.
 fn whole_frames(span: Duration, minor: Duration) -> Option<u64> {
@@ -432,7 +449,8 @@ impl<'a, C: Sleep, L: SchLog, const SLOTS: usize, const FRAMES: usize, const APP
         core::mem::replace(&mut self.timings, [AppTiming::default(); APPS])
     }
 
-    /// The app in `slot` of `minor_frame`, if any.
+    /// The app in `slot` of `minor_frame`, if any, whether it is started
+    /// there or the slot is reserved for its run.
     pub fn app_at(&self, minor_frame: usize, slot: usize) -> Option<usize> {
         // Same lookup as the builder's.
         app_at(&self.table, minor_frame, slot)
@@ -488,7 +506,8 @@ impl<'a, C: Sleep, L: SchLog, const SLOTS: usize, const FRAMES: usize, const APP
             None => self.clock.now(),
         };
         for frame in 0..FRAMES {
-            // Busy from here, or from the frame's start if it began late.
+            // The frame begins now: on its deadline, or later if the frame
+            // before ran long. Busy time is counted from here.
             let began = self.clock.now();
             // Disjoint borrows for the dispatch loop.
             let (apps, log, row) = (&mut self.apps, &mut self.log, &self.table[frame]);
@@ -538,7 +557,7 @@ impl<'a, C: Sleep, L: SchLog, const SLOTS: usize, const FRAMES: usize, const APP
             // was planned to end late.
             let reserved =
                 self.table.get(frame + 1).is_some_and(|next| next.iter().any(|slot| matches!(slot, Slot::Busy(_))));
-            // Finished after the end: an overrun, by now − deadline.
+            // Finished after the end: an overrun, by finished − deadline.
             if !reserved
                 && let Some(late_by) = finished.checked_sub(deadline)
                 && late_by > Duration::ZERO

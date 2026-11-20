@@ -1,6 +1,7 @@
 //! The `ADC`, sampling one input pin at a steady rate into a ring buffer in
 //! RAM through a DMA channel, with no interrupts and nothing to service
-//! faster than every quarter of a second.
+//! faster than every quarter of a second, or converting an input or the
+//! temperature sensor once on demand (see [One-shot reads](#one-shot-reads)).
 //!
 //! # Using it
 //!
@@ -71,7 +72,7 @@
 //! `0xffff` before the channel starts, and again as soon as its sample has
 //! been read. The converter never writes `0xffff`: a FIFO entry has the
 //! result in bits 11:0, the error flag in bit 15 and bits 14:12 reserved
-//! (Table 1123, p1072). So a slot ahead of the channel still holds the
+//! (Table 1123, p1073). So a slot ahead of the channel still holds the
 //! sentinel unless the channel has written it again since it was read —
 //! that is, unless reading has fallen a whole ring behind. `read` looks at
 //! the slot [`GUARD_SAMPLES`] ahead of `WRITE_ADDR`, so the channel moving
@@ -116,8 +117,8 @@
 //! current: with the input buffer enabled, a pad between the logic levels
 //! sources about 120 µA and settles near 2.2 V (erratum RP2350-E9,
 //! Appendix E, p1358–1359), and an audio input biased at mid-supply sits
-//! there all the time. [`Rp2350Adc::stream_from_handle`] therefore, in
-//! order:
+//! there all the time. [`Rp2350Adc::input`] and
+//! [`Rp2350Adc::stream_from_handle`] therefore, in order:
 //!
 //! 1. sets `GPIOn_CTRL` to the null function, high-impedance (Table 650,
 //!    p608–609; §9.3, p586), in case a run before a processor-only reset
@@ -156,7 +157,7 @@
 //!   "can greatly reduce the inherent ripple of the SMPS at light load, and
 //!   therefore the ripple on the ADC supply" (Pico 2 datasheet §5.3, p16).
 //!
-//! No interrupt is enabled (`INTE` stays 0, Table 1126, p1073; the DMA's
+//! No interrupt is enabled (`INTE` stays 0, Table 1126, p1074; the DMA's
 //! `INTE0`–`INTE3` stay 0).
 //!
 //! Page numbers in this crate are PDF page indices of the RP2350 datasheet
@@ -180,7 +181,7 @@ use crate::gpio::{IoBank, PadsBank};
 
 /// Lowest sample rate [`Rp2350Adc::stream_from_handle`] accepts, in hertz:
 /// a pacing period of 48 000 `clk_adc` cycles, well inside the 16-bit
-/// `DIV.INT` (Table 1124, p1072).
+/// `DIV.INT` (Table 1124, p1073).
 pub const MIN_RATE_HZ: u32 = 1_000;
 
 /// Highest sample rate [`Rp2350Adc::stream_from_handle`] accepts, in hertz:
@@ -207,16 +208,16 @@ pub const GUARD_SAMPLES: usize = 512;
 /// Bit 15 of a sample: the conversion did not converge, and "conversion
 /// errors produce undefined results, you should always discard samples
 /// that contain conversion errors" (§12.4.3.4, p1070; `FIFO.ERR`, Table
-/// 1123, p1072).
+/// 1123, p1073).
 pub const SAMPLE_ERROR: u16 = 1 << 15;
 
 /// Bits 11:0 of a sample: the conversion result, 0 for 0 V to 4095 for
-/// `ADC_AVDD` (`FIFO.VAL`, Table 1123, p1072; Table 1437, p1338).
+/// `ADC_AVDD` (`FIFO.VAL`, Table 1123, p1073; Table 1437, p1338).
 pub const SAMPLE_VALUE: u16 = 0x0fff;
 
 /// What a ring slot holds when no sample is waiting in it. The converter
 /// never writes it: bits 14:12 of a FIFO entry are reserved (Table 1123,
-/// p1072).
+/// p1073).
 const SENTINEL: u16 = 0xffff;
 
 const _: () = assert!(RING_SAMPLES * 2 == 1 << RING_SIZE_LOG2);
@@ -236,15 +237,15 @@ struct Adc {
     /// `RESULT` (Table 1121, p1072): the most recent conversion, bits 11:0;
     /// read by one-shot conversions.
     result: u32,
-    /// `FCS` (Table 1122, p1072): `EN` 0, `SHIFT` 1, `ERR` 2, `DREQ_EN` 3,
+    /// `FCS` (Table 1122, p1073): `EN` 0, `SHIFT` 1, `ERR` 2, `DREQ_EN` 3,
     /// `EMPTY` 8, `UNDER` 10 and `OVER` 11 (write 1 to clear), `THRESH`
     /// 27:24. Reset 0.
     fcs: u32,
-    /// `FIFO` (Table 1123, p1072): reading pops the oldest result. A 16-bit
+    /// `FIFO` (Table 1123, p1073): reading pops the oldest result. A 16-bit
     /// read, as the DMA makes here, is a 32-bit read to the register and
     /// returns bits 15:0 (§2.1.5, p28).
     fifo: u32,
-    /// `DIV` (Table 1124, p1072): `INT` 23:8, `FRAC` 7:0. "The divider is
+    /// `DIV` (Table 1124, p1073): `INT` 23:8, `FRAC` 7:0. "The divider is
     /// reset when either of these fields are written."
     div: u32,
 }
@@ -324,8 +325,8 @@ const RESET_ADC: u32 = 1 << 0;
 /// 534, p504).
 const RESET_IO_PADS: u32 = (1 << 6) | (1 << 9);
 
-/// How many times [`Rp2350Adc::new`] reads `CS` for `READY` before giving
-/// up. Each read of an APB register takes at least three `clk_sys` cycles
+/// How many times [`Rp2350Adc::new`] and a one-shot conversion read `CS`
+/// for `READY` before giving up. Each read of an APB register takes at least three `clk_sys` cycles
 /// (§2.1, p26 as summarised in [`RegAddr`]), so this is over 1 ms, against
 /// "a few clock cycles" of `clk_adc` (§12.4.3, p1068).
 const READY_POLLS: u32 = 100_000;
@@ -344,7 +345,7 @@ pub struct RateConfig {
 
 impl RateConfig {
     /// The divider for `hz` samples per second from a `clk_hz` `clk_adc`:
-    /// the period 1 + `INT` + `FRAC` / 256 cycles (Table 1124, p1072) set to
+    /// the period 1 + `INT` + `FRAC` / 256 cycles (Table 1124, p1073) set to
     /// the nearest 256th of a cycle to `clk_hz` / `hz`. `None` outside
     /// [`MIN_RATE_HZ`]–[`MAX_RATE_HZ`].
     ///
@@ -421,7 +422,8 @@ const _: () = assert!(ring_distance(1, 0) == RING_SAMPLES - 1);
 
 // --- Driver --------------------------------------------------------------
 
-/// Why the ADC could not start, or what [`Rp2350AdcStream::read`] found.
+/// Why the ADC could not start, why a one-shot conversion failed, or what
+/// [`Rp2350AdcStream::read`] found.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AdcError {
     /// [`Rp2350Adc::new`]: `CS.READY` did not rise after `CS.EN` was set.
@@ -443,7 +445,7 @@ pub enum AdcError {
     /// discarded, and the next `read` returns samples from now on.
     Overrun,
     /// [`Rp2350AdcStream::read`]: the ADC's FIFO filled up, so conversions
-    /// were lost before the DMA took them (`FCS.OVER`, Table 1122, p1072).
+    /// were lost before the DMA took them (`FCS.OVER`, Table 1122, p1073).
     /// The flag is cleared; the samples already in the ring are still
     /// good, and the next `read` returns them.
     FifoOverflow,
@@ -457,8 +459,9 @@ pub enum AdcError {
     DmaError,
 }
 
-/// The ADC, out of reset and powered, with `clk_adc` running: the factory
-/// for the one [`Rp2350AdcStream`].
+/// The ADC, out of reset and powered, with `clk_adc` running: one-shot
+/// conversions through [`input`](Self::input) and [`read`](Self::read), or
+/// the factory for the one [`Rp2350AdcStream`].
 ///
 /// `new` consumes the board's [`DeviceHandle<Rp2350Adc>`] and
 /// [`stream_from_handle`](Self::stream_from_handle) consumes this, so there
@@ -478,7 +481,7 @@ impl Rp2350Adc {
     ///
     /// `&Rp2350Clocks` proves `PLL_USB` runs at 48 MHz. Waits a few
     /// `clk_adc` cycles for the analogue power-up; [`AdcError::NotReady`]
-    /// if `READY` has not risen after [`READY_POLLS`] reads of `CS`.
+    /// if `READY` has not risen after 100 000 reads of `CS` (over 1 ms).
     pub fn new(_handle: DeviceHandle<Rp2350Adc>, _clocks: &Rp2350Clocks) -> Result<Self, AdcError> {
         let adc = adc();
         unsafe {
@@ -514,7 +517,9 @@ impl Rp2350Adc {
 
     /// One conversion of the on-chip temperature sensor, 0 to 4095. The
     /// first call powers the sensor (`CS.TS_EN`, Table 1120, p1072), which
-    /// then stays on; convert with [`die_temperature_millicelsius`].
+    /// then stays on until a stream is started; convert the code with
+    /// [`code_to_microvolts`](api::adc::code_to_microvolts) and then
+    /// [`die_temperature_millicelsius`].
     pub fn read_temperature(&mut self) -> Result<u16, AdcError> {
         self.temperature_on = true;
         self.convert(AINSEL_TEMPERATURE)
@@ -664,8 +669,9 @@ struct AdcPin<const N: usize>;
 
 impl<const N: usize> AdcPin<N> {
     /// Pin `N` is an ADC input on this package, GPIO26–29 (Table 1117,
-    /// p1067). Referenced by [`Rp2350Adc::stream_from_handle`], so it is
-    /// evaluated, unlike an unreferenced associated const.
+    /// p1067). Referenced by [`Rp2350Adc::input`] and
+    /// [`Rp2350Adc::stream_from_handle`], so it is evaluated, unlike an
+    /// unreferenced associated const.
     const VALID: () = assert!(N >= 26 && N <= 29);
 }
 

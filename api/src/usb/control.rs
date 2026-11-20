@@ -111,9 +111,10 @@ pub enum Effect {
     SetAddress(u8),
     /// The configuration changed from `from` to `to` (each 0 or
     /// [`CONFIGURATION_VALUE`]); apply immediately. Going to 1: enable the
-    /// data endpoints with both data toggles at DATA0 (USB 2.0 §9.4.5
-    /// note on SetConfiguration). Going to 0: disable them. 1 to 1 is a
-    /// re-configuration and must also reset the toggles.
+    /// data endpoints with both data toggles at DATA0 (USB 2.0 §9.1.1.5:
+    /// configuring a device resets every endpoint's toggle to DATA0). Going
+    /// to 0: disable them. 1 to 1 is a re-configuration and must also reset
+    /// the toggles.
     ConfigurationChanged {
         /// Previous configuration value.
         from: u8,
@@ -134,7 +135,8 @@ pub enum Effect {
     },
     /// SET_INTERFACE(alternate 0) on this interface: every interface here
     /// has only alternate setting 0, so the only effect is that the
-    /// interface's endpoints restart with DATA0 toggles (USB 2.0 §9.4.10).
+    /// interface's endpoints restart with DATA0 toggles (USB 2.0 §9.4.10,
+    /// §9.1.1.5).
     InterfaceReset(u8),
 }
 

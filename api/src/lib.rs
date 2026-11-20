@@ -2,9 +2,12 @@
 //!
 //! This crate is the **portability boundary** of the system. It contains the
 //! trait definitions the rest of the workspace is written against, plus the
-//! pin-ownership machinery in [`device`]: the zero-sized
-//! [`device::PinHandle`] and the [`define_board!`] macro that generates the
-//! board type creating one handle per physical pin, once per boot.
+//! hardware-ownership machinery in [`device`]: the zero-sized
+//! [`device::PinHandle`] and [`device::DeviceHandle`], and the
+//! [`define_board!`] macro that generates the board type creating one
+//! handle per physical pin and per peripheral, once per boot. It also holds
+//! the chip-independent parts of the application framework: apps, the
+//! scheduler, the software bus and time (see the module list below).
 //!
 //! Two Rust terms carry this whole crate, so first: a **trait** is a named
 //! set of function signatures — the compile-time counterpart of an
@@ -24,11 +27,12 @@
 //! responsible for the obligations listed in the function's `# Safety`
 //! section. The only `unsafe fn`s this crate exposes are
 //! [`device::PinHandle::new`] and [`device::DeviceHandle::new`], the
-//! constructors that create a handle without a board; the crate's one
-//! `unsafe` block is the call to them in the code [`define_board!`]
-//! generates, which expands into the invoking crate and is the intended
-//! caller their Safety sections describe. Everything here
-//! compiles for the host as readily as it does for
+//! constructors that create a handle without a board. They are called in
+//! the code [`define_board!`] generates, which expands into the invoking
+//! crate and is the intended caller their Safety sections describe. The
+//! crate's only other `unsafe` code is inside [`multicore::Handoff`], the
+//! one-shot cell that passes a value from one core to the other. Everything
+//! here compiles for the host as readily as it does for
 //! `thumbv8m.main-none-eabihf` — the compiler's name for the target: the
 //! Armv8-M Mainline instruction set of the RP2350's Cortex-M33 cores, no
 //! operating system, hardware floating point — which is what makes
@@ -51,28 +55,34 @@
 //! The arrow direction is the whole point: `api` never depends on `pico2`, so
 //! a driver for a completely different chip can implement the same traits.
 //! An application still has to name a concrete driver type somewhere — the
-//! `demo` crate constructs `Rp2350Gpio` and asks the board for its `led`
-//! pin — but past that point everything it does goes through these traits, so
-//! those naming lines are the only ones that change when the chip does.
+//! `templates/pico2` application constructs `Rp2350Gpio` and asks the board
+//! for its `led` pin — but past that point everything it does goes through
+//! these traits, so those naming lines are the only ones that change when
+//! the chip does.
 //!
 //! ## The modules, in reading order
 //!
 //! * [`common`] — the value-transfer vocabulary. [`common::ErrorType`] names
 //!   the single error type a peripheral reports; [`common::Read`] and
-//!   [`common::Write`] move values to and from a peripheral.
-//! * [`device`] — pin ownership. A [`device::PinHandle<N>`](device::PinHandle)
+//!   [`common::Write`] move values to and from a peripheral. It also holds
+//!   [`common::ring::ByteRing`], a fixed-capacity byte FIFO, and
+//!   [`common::num::Number`], a bound for numeric value types.
+//! * [`device`] — hardware ownership. A [`device::PinHandle<N>`](device::PinHandle)
 //!   is a zero-sized value whose possession proves, at compile time, that
 //!   physical pin `N` exists on this board and is not owned anywhere else;
-//!   [`define_board!`] generates the board singleton that creates every
-//!   handle exactly once.
+//!   a [`device::DeviceHandle<T>`](device::DeviceHandle) is the same proof
+//!   for the peripheral driver type `T` controls. [`define_board!`]
+//!   generates the board singleton that creates every handle exactly once.
+//!   [`device::driver::Driver`] names a chip driver that is written
+//!   one value type and read another.
 //! * [`gpio`] — the first peripheral. [`gpio::Gpio`] is the factory trait
 //!   that consumes a `PinHandle` and returns a configured input or output
 //!   pin, typed by its pin number.
 //! * [`usb`] — chip-independent USB device logic for a CDC-ACM ("USB
-//!   serial") function: SETUP decoding, descriptor building, the endpoint-0
-//!   request state machine and a byte FIFO. Pure computation, unit-tested on
-//!   the host down to the exact bytes; the RP2350 register driver that uses
-//!   it lives in `pico2::usb`.
+//!   serial") function: SETUP decoding, descriptor building, CDC-ACM line
+//!   coding and the endpoint-0 request state machine. Pure computation,
+//!   unit-tested on the host down to the exact bytes; the RP2350 register
+//!   driver that uses it lives in `pico2::usb`.
 //! * [`i2c`] and [`spi`] — controller traits for the two synchronous serial
 //!   buses: whole I2C transfers addressed to a 7-bit device address, and
 //!   full-duplex SPI byte transfers. A UART needs no trait of its own: it
@@ -100,11 +110,16 @@
 //!   RP2350 bootrom as a state machine that never blocks, over a
 //!   [`multicore::Mailbox`] the chip crate supplies, tested on the host
 //!   against a model of the other core; the RP2350 driver that uses it is
-//!   `pico2::multicore`.
+//!   `pico2::multicore`. [`multicore::Handoff`] passes one value from one
+//!   core to the other.
+//! * [`time`] — times tagged with the clock they came from: a
+//!   [`time::Time<C>`](time::Time) for clock `C`, a [`time::Duration`], and
+//!   [`time::DisciplinedClock`], a free-running counter read as mission
+//!   elapsed time and steered to a reference such as GPS UTC.
 //!
 //! ## Design notes
 //!
-//! Two conventions run through every trait here:
+//! Two conventions run through every peripheral trait here:
 //!
 //! * **Errors are an associated type, declared once per implementing type.**
 //!   See [`common::ErrorType`] for why this is a separate supertrait rather

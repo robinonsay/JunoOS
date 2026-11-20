@@ -190,7 +190,8 @@ pub enum SbError {
     /// A pipe was full and refused the message. The pipe counted it in
     /// [`Pipe::take_dropped`].
     PipeFull,
-    /// A publish reached some subscribers but not all.
+    /// At least one subscriber of the id refused the message. Every
+    /// subscriber was still offered it.
     Undelivered {
         /// Subscribers of the id that accepted the message.
         delivered: usize,

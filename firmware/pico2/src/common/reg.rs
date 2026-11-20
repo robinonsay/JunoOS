@@ -26,6 +26,10 @@
 ///   USB), zero-wait-state: reads and writes complete in one bus cycle.
 /// * `0xd000_0000` — **core-local** peripherals, i.e. [`SIO`](RegAddr::SIO).
 ///
+/// The Cortex-M33's own registers at `0xe000_0000` (`CPACR`, `VTOR`,
+/// SysTick) are Arm's, not the RP2350's, so they are not listed here; each
+/// is defined where it is used ([`crate::systick`] and the crate root).
+///
 /// # Atomic aliases
 ///
 /// Every peripheral register block is allocated 4 kB, and most are mirrored

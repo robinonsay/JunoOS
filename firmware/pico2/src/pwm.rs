@@ -1,5 +1,6 @@
-//! Square-wave outputs on the `PWM` block: one GPIO, one fixed frequency,
-//! 50 % duty, switched on and off from a polled loop.
+//! Fixed-frequency outputs on the `PWM` block: one GPIO, one fixed
+//! frequency, and either a 50 % square wave switched on and off from a
+//! polled loop or any duty set through [`PwmPin`] (see [Duty](#duty)).
 //!
 //! # Using it
 //!
@@ -217,7 +218,8 @@
 //!
 //! No interrupt is enabled (`IRQ0_INTE` and `IRQ1_INTE` stay at their reset
 //! value 0, Table 1138, p1089; Table 1141, p1091) and nothing here waits
-//! after configuration: [`Write::write`] is one store.
+//! after configuration: [`Write::write`] and [`PwmPin::set_duty`] are each
+//! one store.
 //!
 //! Page numbers in this crate are PDF page indices of the RP2350 datasheet
 //! (one more than the number printed in the page footer).
@@ -540,10 +542,11 @@ const _: () = match SquareConfig::for_frequency(CLK_SYS_HZ, 700) {
 
 // --- Driver --------------------------------------------------------------
 
-/// Why [`Rp2350Pwm::square_from_handle`] could not configure a pin. In
-/// every case the pin handle has been consumed and the pin left as it was:
-/// unconnected and, on a pin untouched since power-on, isolated in its
-/// reset state.
+/// Why [`Rp2350Pwm::square_from_handle`] could not configure a pin, or
+/// why [`PwmPin::set_duty`] refused a duty. In every
+/// `square_from_handle` case the pin handle has been consumed and the pin
+/// left as it was: unconnected and, on a pin untouched since power-on,
+/// isolated in its reset state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PwmError {
     /// The requested frequency is outside the accepted range.
@@ -700,8 +703,9 @@ impl Rp2350Pwm {
         self.running[slice] = Some(config);
         self.claimed |= claim;
         unsafe { connect_pin(N) };
-        // CC = 0 was written by start_slice or is the slice's other
-        // channel's untouched value for this half: duty 0.
+        // This channel's half of CC is 0: start_slice wrote 0 to both
+        // halves, just now or when the other channel's pin started the
+        // slice, and nothing has written this half since. Duty 0.
         Ok(Rp2350PwmSquare { config, duty: 0 })
     }
 }

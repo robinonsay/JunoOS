@@ -270,7 +270,7 @@ const MAX_DIVISOR_64THS: u32 = 65535 * 64;
 
 /// Fastest rate [`Rp2350Uart::new`] accepts: `clk_peri / 16`, 9.375 Mbaud.
 pub const MAX_BAUD: u32 = CLK_PERI_HZ / 16;
-/// Slowest rate [`Rp2350Uart::new`] accepts, rounded up: about 143 baud.
+/// Slowest rate [`Rp2350Uart::new`] accepts, rounded up: 144 baud.
 pub const MIN_BAUD: u32 = (4 * CLK_PERI_HZ as u64).div_ceil(MAX_DIVISOR_64THS as u64) as u32;
 
 impl BaudDivisor {

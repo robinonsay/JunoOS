@@ -42,8 +42,10 @@ impl<'a, T, const S: usize> ArrayBroker<'a, T, S> {
 
     /// Subscribers registered.
     ///
-    /// Returns 0 if called from inside a delivery that is also
-    /// subscribing; outside a publish it is exact.
+    /// Exact everywhere, including from inside a delivery: the registry is
+    /// only borrowed mutably within [`subscribe`](Broker::subscribe), which
+    /// runs no other code. Were it ever found so borrowed, this would
+    /// return 0.
     pub fn len(&self) -> usize {
         // A shared borrow; it can only fail while `subscribe` holds the
         // mutable one, which never runs user code.

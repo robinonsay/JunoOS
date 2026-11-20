@@ -9,7 +9,7 @@ Requires [cargo-generate](https://github.com/cargo-generate/cargo-generate)
 0.23.4 or later (`cargo install cargo-generate`).
 
 ```sh
-# Pick a board interactively:
+# Pick a template interactively:
 cargo generate --git https://github.com/robinonsay/rustos
 
 # Or name one directly:
@@ -49,7 +49,8 @@ the same layout every app has:
 | `app.rs` | The app: its state, its `App` hooks and its tests |
 | `table.rs` | Its iLoad: its schedule slot and every value it is configured with, checked at compile time |
 
-Generate it in the directory that holds the crate's apps. Pass `--force`
+Generate it in the directory that holds the crate's apps (below, a crate at
+`flight/` beside a RustOS checkout at `deps/rustos`). Pass `--force`
 so cargo-generate keeps a snake_case name instead of changing it to
 kebab-case, which is not a valid module name:
 
@@ -64,10 +65,12 @@ table, `AirDataTable`. Then:
 
 1. Add `pub mod air_data;` to the apps module.
 2. Implement `From<api::app::HealthTlm<Id>>` for the crate's message type,
-   where `Id` is the crate's app-id type, and pick the app's `health_mid`.
+   where `Id` is the crate's app-id type, and pick the app's `health_mid`
+   in `table.rs`.
 3. Point `MINOR_FRAME_MS` and `MAJOR_FRAME_MS` in `table.rs` at the
    crate's own schedule constants.
-4. In `main`, build it with its id, table, input pipe and bus, put it in
+4. In `main`, subscribe its input pipe to the bus, build it with its id,
+   table, input pipe and bus, put it in
    the scheduler's app array and `register_span` its
    `table.slot.durations()` and `table.slot.frames`.
 5. Write its work in `handle` and `on_process`, and move every number it
@@ -79,7 +82,8 @@ and its health is an `api::app::Health`.
 
 ## Co-developing an app and RustOS
 
-Generated apps track RustOS's default branch on GitHub. To build against a
+Applications generated from a board template track RustOS's default
+branch on GitHub. To build against a
 local checkout instead, add a patch section to the app's `Cargo.toml`:
 
 ```toml

@@ -1,8 +1,10 @@
 //! Driving the `RESETS` subsystem reset controller.
 //!
-//! The public surface is three functions over one register: [`clr_reset_reg`]
-//! releases peripheral blocks from reset, [`set_reset_reg`] asserts it, and
-//! [`wait_for_reset_done`] spins until released blocks report ready. The
+//! The public surface is five functions over two registers: [`clr_reset_reg`]
+//! releases peripheral blocks from reset, [`set_reset_reg`] asserts it,
+//! [`wait_for_reset_done`] spins until released blocks report ready,
+//! [`is_reset_done`] checks that once without waiting, and [`cycle_reset`]
+//! asserts, releases and waits in one call. The
 //! register-level detail — polarities, bit assignments, and the ways this
 //! block can silently kill a program — lives on the private `Reset` layout
 //! struct below.

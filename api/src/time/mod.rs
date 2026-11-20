@@ -8,7 +8,7 @@
 //!
 //! This module makes the clock part of the type. A [`Time<C>`] carries a
 //! **type parameter** `C` — a type supplied in angle brackets, like the
-//! element type of an array — naming the clock it belongs to. `Time<Gps>`
+//! element type of an array — naming the clock it belongs to. `Time<Utc>`
 //! and `Time<Met>` are distinct types, so adding one to the other is a
 //! compile error rather than a wrong answer. Converting between clocks is
 //! then something done on purpose, by code written for that pair.
@@ -92,7 +92,8 @@ impl<C: ClockId> Time<C> {
     /// [`Clock`] to build its reading.
     ///
     /// The fraction is truncated to whole 2^-32 s units. Seconds wrap
-    /// after 2^32, like [`Self::add`]. Panics if `ticks_per_second` is 0.
+    /// after 2^32, in debug builds too (unlike [`Add`]). Panics if
+    /// `ticks_per_second` is 0.
     pub const fn from_ticks(ticks: u64, ticks_per_second: u32) -> Self {
         let hz = ticks_per_second as u64;
         // The remainder is below `hz` < 2^32, so shifting it left by 32
@@ -115,8 +116,8 @@ impl<C: ClockId> Time<C> {
     /// Returns the time in seconds as an `f32`.
     ///
     /// The result is the nearest `f32` to the exact value. An `f32` holds
-    /// 24 significant bits, so precision falls as the time grows: about
-    /// 60 ns at 1 s, 1 ms at 10^4 s, and 256 s near the 2^32 s limit.
+    /// 24 significant bits, so precision falls as the time grows: steps of
+    /// about 120 ns at 1 s, 1 ms at 10^4 s, and 256 s near the 2^32 s limit.
     /// Use [`Self::to_f64`] when that matters.
     pub fn to_f32(&self) -> f32 {
         self.to_fixed() as f32 / Self::ONE_SECOND as f32
@@ -135,8 +136,9 @@ impl<C: ClockId> Time<C> {
 
     /// The time in periods of a `ticks_per_second` counter since the
     /// epoch, rounded to nearest. [`Self::from_ticks`] truncates by under
-    /// one 2^-32 s unit, far less than half a tick at any rate up to 1 GHz,
-    /// so a reading built from a count converts back to that count.
+    /// one 2^-32 s unit (about 0.23 ns), less than half a tick at any rate
+    /// up to 1 GHz, so a reading built from a count converts back to that
+    /// count.
     const fn as_ticks_nearest(&self, ticks_per_second: u32) -> u64 {
         // 64.64 product in u128, plus half a unit, back to whole ticks by
         // dropping 32 bits. fixed < 2^64 and the rate < 2^32, so the sum is

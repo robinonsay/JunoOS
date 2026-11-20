@@ -10,6 +10,9 @@ use super::{Mid, SbError, Subscriber};
 /// LibJuno's `PIPE_ROOT_T<MsgT, N>` (`broker_api.hpp`): a circular FIFO
 /// tagged with the message id it subscribes to.
 ///
+/// A pipe is a [`Subscriber`] when `T: Clone`: each delivery queues a
+/// copy of the published message.
+///
 /// The queue is a [`heapless::Deque`], so the storage is inline — a
 /// `Pipe<T, N>` is `N` messages plus a few words, wherever it lives. It
 /// sits behind a [`RefCell`] so that the broker, holding `&Pipe`, can push
@@ -20,7 +23,8 @@ use super::{Mid, SbError, Subscriber};
 /// borrowed, and a refused one is dropped after), so the `RefCell` is
 /// never found mutably borrowed. The one way to make these methods panic
 /// is a message type whose `Clone` reaches back into the very pipe being
-/// [`peek`](Self::peek)ed and pops from it.
+/// [`peek`](Self::peek)ed and changes it (pops, pushes, clears or
+/// delivers to it).
 ///
 /// When the pipe is full, a delivered message is refused and counted
 /// ([`take_dropped`](Self::take_dropped)); the messages already queued are
@@ -125,9 +129,10 @@ impl<T: Clone, const N: usize> Pipe<T, N> {
     pub fn peek(&self) -> Option<T> {
         // Clone under a shared borrow. `Clone` is user code, but a shared
         // borrow only conflicts with `borrow_mut`, and a `Clone` that
-        // reached back into this pipe to pop would be a bug in that `Clone`.
-        // `try_borrow` keeps even that case from panicking: it sees an
-        // empty pipe.
+        // reached back into this pipe to pop would be a bug in that `Clone`
+        // (the pop panics). `try_borrow` cannot fail here, since no mutable
+        // borrow is held while other code runs; if it ever did, this would
+        // see an empty pipe rather than panic.
         let queue = self.queue.try_borrow().ok()?;
         // Copy the front message, if any.
         queue.front().cloned()

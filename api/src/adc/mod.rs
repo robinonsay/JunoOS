@@ -35,7 +35,7 @@ use crate::common::ErrorType;
 /// One conversion result.
 ///
 /// A converter can report that a particular conversion failed (the
-/// RP2350's flags conversions that did not settle, for instance). Such a
+/// RP2350's ADC flags conversions that did not converge, for instance). Such a
 /// sample keeps its place in time, so that a stream's sample count stays
 /// a clock, but has no value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

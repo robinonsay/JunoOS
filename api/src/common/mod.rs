@@ -1,10 +1,21 @@
+//! The value-transfer vocabulary the fallible peripheral traits build on.
+//!
+//! [`ErrorType`] names the one error type a peripheral reports, and
+//! [`Read`] and [`Write`] move values from and to it. Two helpers sit
+//! beside them: [`ring::ByteRing`], a fixed-capacity byte FIFO, and
+//! [`num::Number`], a bound for numeric value types.
+
 pub mod num;
+pub mod ring;
+
 /// Declares the single error type a peripheral reports.
 ///
 /// `Error` below is an **associated type**: a type member of a trait, for
 /// which each implementing type chooses one concrete type. Every fallible
-/// trait in this crate ([`Write`], [`Read`], and the factory traits in
-/// [`crate::gpio`]) takes `ErrorType` as a **supertrait**: writing
+/// peripheral trait in this crate ([`Write`], [`Read`],
+/// [`crate::gpio::Gpio`], and the I2C, SPI, PWM, ADC and watchdog traits)
+/// takes `ErrorType` as a **supertrait**, directly or through `Read` or
+/// `Write`: writing
 /// `trait Write<T>: ErrorType` means a type may implement `Write` only if it
 /// also implements `ErrorType`, which is why `Self::Error` is nameable
 /// inside `Write`. A type therefore names its error **once**, and all of its
@@ -46,9 +57,6 @@ pub mod num;
 /// `core::error::Error`, which would drag in `Display` and force every
 /// implementor to write human-readable strings into flash, the chip's
 /// nonvolatile program memory.
-///
-pub mod ring;
-
 pub trait ErrorType {
     /// The error reported by every fallible operation on this type.
     ///
@@ -68,7 +76,7 @@ pub trait ErrorType {
 /// Generic over the value rather than the peripheral, so a single type can be
 /// written in several representations. A GPIO pin implements `Write<bool>`; a
 /// UART (a peripheral that sends and receives bytes serially over a pair of
-/// wires) would implement `Write<u8>`; a DAC (digital-to-analog converter)
+/// wires) implements `Write<u8>`; a DAC (digital-to-analog converter)
 /// might implement both `Write<u16>` and `Write<f32>`.
 ///
 /// Implementations should be **idempotent and non-blocking** where the

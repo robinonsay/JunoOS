@@ -3,7 +3,8 @@ resolver = "3"
 members = ["api", "firmware/pico2"]
 # Plain `cargo build`/`cargo test` covers the portable crates on the host;
 # board crates only make sense for their own triple, built via the aliases
-# in .cargo/config.toml (e.g. `cargo pico2`).
+# in .cargo/config.toml (e.g. `cargo pico2`). A [build] target set in a
+# parent directory's .cargo/config.toml overrides the host; see there.
 default-members = ["api"]
 
 [profile.dev]

@@ -28,7 +28,8 @@
 //! only in scopes where the trait itself is imported, so leaving out
 //! `use api::gpio::Gpio;` or `use api::common::Write;` turns the calls
 //! above into "method not found" errors even though the driver types are in
-//! scope. The complete program is `demo/src/main.rs`.
+//! scope. The complete program is the blinky in the project template,
+//! `templates/pico2/src/main.rs`.
 
 use crate::{
     common::{ErrorType, Read, Write},

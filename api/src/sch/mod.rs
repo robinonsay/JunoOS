@@ -1,7 +1,7 @@
 //! Schedulers: what decides when each [`App`](crate::app::App) runs.
 //!
-//! [`Scheduler`] is the interface — start every app, run the schedule,
-//! exit — and [`TdmSch`] is the time-division-multiplexed cyclic executive
+//! [`Scheduler`] is the interface — run the schedule, then exit every
+//! app — and [`TdmSch`] is the time-division-multiplexed cyclic executive
 //! that implements it, the Rust form of LibJuno's `SCH_API_T` /
 //! `SCH_ROOT_T` (`juno/sch/juno_sch_api.hpp`).
 //!
@@ -33,15 +33,20 @@ pub enum SchEvent<'e> {
     },
     /// A minor frame's apps finished after the frame should have ended,
     /// so the next frame starts late. The schedule keeps its absolute
-    /// deadlines, so later frames catch up if they have slack.
+    /// deadlines, so later frames catch up if they have slack. Not logged
+    /// for a frame whose next frame is reserved for a multi-frame run
+    /// ([`TdmSchBuilder::register_span`]): that frame was planned to end
+    /// late.
     Overrun {
         /// The minor frame (row of the schedule table) that ran long.
         minor_frame: usize,
         /// How far past the frame's end its apps finished.
         late_by: Duration,
         /// The app that ran longest in that frame, by its index in the
-        /// scheduler's app array: the likeliest cause. `None` if the frame
-        /// had no apps (it began late).
+        /// scheduler's app array: the likeliest cause. An app whose run
+        /// spilled in from an earlier frame counts as having run from the
+        /// frame's deadline until the frame began. `None` if the frame had
+        /// no apps (it began late).
         slowest_app: Option<usize>,
     },
     /// The clock could not wait for a frame boundary. The next frame

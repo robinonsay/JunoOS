@@ -46,47 +46,67 @@ citations:
   desktop operating systems open as a serial port without a driver install),
   **PWM** square-wave outputs (a fixed-frequency tone on a pin, switched
   on and off), the **ADC** (analog-to-digital converter) sampling one
-  analog pin continuously into memory through a **DMA** channel, and
-  **starting the second core** with its own stack.
+  analog pin continuously into memory through a **DMA** channel, the two
+  **UARTs** (polled, or with their FIFOs serviced by DMA), the two **I2C**
+  and two **SPI** bus controllers, and **starting the second core** with
+  its own stack.
 
 The boot pieces and the GPIO driver are taught from scratch in this
 repository's [bare-metal tutorial](docs/tutorials/rp2350_baremetal/index.md). No external
 embedded crates (`cortex-m`, `cortex-m-rt`, `rp-hal`, `embassy`, …) are
-used; nothing outside this repository is compiled into the firmware image.
+used. The one crate from outside this repository is
+[`heapless`](https://docs.rs/heapless/0.9.3/heapless/), the fixed-capacity
+queues and vectors `api`'s software bus is built on; it and its own small
+dependencies are built with every application, alongside `api`.
 
 ## Repository layout
 
 The code is a Cargo **workspace** (one repository containing several Rust
-packages, called *crates*, built together) with three crates:
+packages, called *crates*, built together) with two library crates. Neither
+is a program you flash: an application is a separate binary crate, generated
+from `templates/`, that depends on both.
 
 ```
 rustos/
-├── api/                portable hardware-interface definitions (library)
-├── firmware/pico2/     RP2350 runtime + drivers (library)
-├── demo/               the blinky application (binary — this is what you flash)
-├── docs/               datasheets, the bare-metal tutorial, and handover notes
-├── blinky.elf          prebuilt demo binary (ELF format)
-└── blinky.uf2          prebuilt demo binary (UF2 format, ready to drag onto the board)
+├── api/                 portable traits, ownership types and the app framework (library)
+├── firmware/pico2/      RP2350 runtime + drivers (library)
+├── templates/           cargo-generate templates: a Pico 2 application, and an app module
+├── docs/                datasheets and manuals, their text extractions, and the bare-metal tutorial
+├── cargo-generate.toml  marks the repository as a cargo-generate template source
+└── .cargo/config.toml   the `cargo pico2` build alias
 ```
 
 **`api/`** is the portability boundary. It defines the traits (Rust
-interfaces) that application code programs against — `ErrorType`, `Read`,
-`Write`, `Gpio`, `GpioPinIn`, `GpioPinOut`, and the `Pull` enum — plus the
-`PinHandle` ownership type and the `define_board!` macro described in the
-next section. Its `usb` module holds the chip-independent half of the USB
+interfaces) that application code programs against, one module per
+subject:
+
+- `common` — `ErrorType`, `Read`, `Write`, and a fixed-capacity byte ring
+  (`common::ring::ByteRing`);
+- `device` — the `PinHandle` and `DeviceHandle` ownership types and the
+  `define_board!` macro described in the next section;
+- `gpio` — `Gpio`, `GpioPinIn`, `GpioPinOut`, `EdgeLatch` and the `Pull`
+  enum;
+- `pwm`, `adc`, `watchdog`, `i2c`, `spi` — the traits for each peripheral
+  kind (for `pwm`, a factory trait and a per-pin trait); a UART needs none of its own, being a byte stream
+  through `Read<u8>` and `Write<u8>`;
+- `error` — `Error` and `ErrorKind`, so code can tell what *sort* of
+  failure an error is without knowing its type;
+- `app`, `iload`, `sch`, `sb`, `time` — the application framework,
+  described [below](#applications-scheduling-and-messaging).
+
+Its `usb` module holds the chip-independent half of the USB
 serial port — descriptors, the endpoint-0 request state machine, CDC-ACM
-line coding, a byte ring buffer — unit-tested on the host. Its `multicore`
+line coding — unit-tested on the host. Its `multicore`
 module is the bootrom's handshake for starting the second core, as a state
 machine that never waits, tested on the host against a model of that core.
 Its `time` module tags every time with the clock it came from, and has a
 `DisciplinedClock`: a free-running counter read as mission elapsed time and
 steered to a reference such as GPS UTC, shareable between cores without
 locks, with exactly one `Discipliner` allowed to steer it.
-The crate
-contains no register addresses and no dependency on any other crate in the
-workspace, so it compiles for your host machine as well as for the
-microcontroller, which is what makes logic written against it testable
-without hardware.
+The crate contains no register addresses and no dependency on any other
+crate in the workspace (its one dependency is `heapless`), so it compiles
+for your host machine as well as for the microcontroller, which is what
+makes logic written against it testable without hardware.
 
 **`firmware/pico2/`** is a **library** crate (it has `src/lib.rs` and no
 `main.rs`) holding everything that must exist before and around user code:
@@ -107,7 +127,8 @@ without hardware.
   fault puts the application's outputs back to their safe level before the
   program stops;
 - `common/board.rs`, which instantiates `api`'s `define_board!` macro as the
-  `Rp2350` board type with the Pico 2's pin map;
+  `Rp2350` board type with the Pico 2's pin map and a device handle for
+  each driver below except `uart_dma`, which is converted from a `uart`;
 - a GPIO driver (`Rp2350Gpio`, producing `Rp2350GpioIn` / `Rp2350GpioOut`
   pins) implementing the `api` traits, inputs with their hardware edge
   latch (`EdgeLatch`) for catching short pulses by polling;
@@ -136,17 +157,60 @@ without hardware.
   stack of its own with a stack limit that faults instead of overflowing,
   the FIFOs between the cores read and written without waiting, and which
   core is running;
+- `uart` (`Rp2350Uart`): the two PL011 UARTs, polled through their 32-byte
+  FIFOs, never blocking;
+- `uart_dma` (`Rp2350UartDma`, `UartRxRing`, `UartTxRing`): a UART
+  converted to use two DMA channels, one filling a 4 kB receive ring and
+  one draining a 1 kB transmit ring, so bytes keep moving between polls;
+- `i2c` (`Rp2350I2c`): the two I2C controllers, polled, 7-bit addresses,
+  10 kHz–1 MHz;
+- `spi` (`Rp2350Spi`): the two SPI controllers, polled, 8-bit words in the
+  four Motorola modes, with chip-select left to an ordinary GPIO output;
+- `common/pinmux.rs` (internal to the crate): which pins can carry which
+  UART, I2C and SPI signal, checked at compile time, and the sequence that
+  connects a pin to its peripheral;
 - `link.ld`, the linker script that places every section in the RP2350's
   memory map, and `build.rs`, which tells Cargo where to find it.
 
-**`demo/`** is the only **binary** crate — a blinky that toggles the Pico 2's
-onboard LED. It takes the `Rp2350` board singleton (a value the program can
-obtain exactly once — the next section shows the mechanism), constructs the
-`Rp2350Gpio` driver, passes the board's `led` pin handle to that driver to
-receive a configured output pin, and drives it through the portable
-`Write<bool>` trait. Building the
-workspace produces the flashable image at
-`target/thumbv8m.main-none-eabihf/release/demo`.
+**`templates/`** holds the [cargo-generate](https://github.com/cargo-generate/cargo-generate)
+templates. `templates/pico2` generates a standalone Pico 2 application — a
+blinky that toggles the on-board LED — with its own `.cargo/config.toml`
+(target triple, linker flags, and `picotool` as the `cargo run` runner)
+and `api`/`pico2` as git dependencies. Its `main` takes the `Rp2350` board
+singleton (a value the program can obtain exactly once — the next section
+shows the mechanism), constructs the `Rp2350Gpio` driver, passes the
+board's `led` pin handle to that driver to receive a configured output
+pin, and drives it through the portable `Write<bool>` trait.
+`templates/app` generates one application module (an `api::app::App` with
+its configuration table) inside an existing crate.
+[`templates/README.md`](templates/README.md) has the commands.
+
+## Applications, scheduling and messaging
+
+The rest of `api` is a small flight-software framework, the Rust form of
+LibJuno's application, scheduler and software-bus APIs. Each module's
+rustdoc gives the detail; those of `app`, `sch`, `sb` and `time` also
+give the mapping to LibJuno.
+
+- `app` — the `App` trait a scheduler drives (`on_process`, `on_exit`),
+  and `Health`, the record every app keeps of its runs and reports as
+  `HealthTlm`.
+- `iload` — configuration tables compiled into the image: every number an
+  app is configured with lives in its `table.rs`, checked at compile time
+  with `assert_ok`, and `Slot` is the app's place in the schedule.
+- `sch` — the `Scheduler` trait and `TdmSch`, a time-division-multiplexed
+  cyclic executive: fixed minor frames, a table of which apps run in each,
+  and overruns and app failures logged and counted rather than stopping
+  the schedule. A schedule is built with `TdmSchBuilder` and cannot change
+  once it runs.
+- `sb` — the software bus: apps publish messages by id (`Mid`) through a
+  broker (`ArrayBroker`), and each subscriber drains its own fixed-size
+  `Pipe`. A broker belongs to one thread of execution; `IpcApp` carries
+  messages between two of them, such as the two cores, over lock-free
+  queues.
+- `time` — `Time<C>`, a time tagged with the clock `C` it came from, so
+  mixing clocks is a compile error; the `Clock` and `Sleep` traits; and
+  `DisciplinedClock`.
 
 ## The API: invariants at compile time
 
@@ -240,7 +304,7 @@ zero-variant enum has no values at all: the `Err` case of a
 that branch. Every failure mode was already handled before the pin existed;
 the type signature says so.
 
-The blinky in `demo/src/main.rs` is the whole pattern. Its `main`, minus the
+The blinky in `templates/pico2/src/main.rs` is the whole pattern. Its `main`, minus the
 busy-wait `delay()`, is:
 
 ```rust
@@ -258,7 +322,7 @@ fn main() -> ! {
 ```
 
 Two of the setup calls can report failure — `take()` returns the `Option`
-described above, and `output_from_handle` returns a `Result` — and the demo
+described above, and `output_from_handle` returns a `Result` — and the blinky
 `.unwrap()`s each one, meaning: halt if the call failed. That is the right
 choice here: the `Option` is `None` only on a second call to a
 once-per-boot constructor, which is a program bug, not a condition to
@@ -267,7 +331,9 @@ once-per-boot property is enforced by consuming `board.gpio`, at compile
 time. The same
 listing, annotated line by line, is the crate-level doc of
 `firmware/pico2/src/lib.rs` ("Writing an application"). Run
-`cargo doc --open` to browse the API documentation; when wiring your own
+`cargo doc -p api --open`, or
+`cargo doc -p pico2 --target thumbv8m.main-none-eabihf --open`, to browse
+the API documentation; when wiring your own
 *input* pin, read `api::gpio::Pull` there (source: `api/src/gpio/mod.rs`),
 which explains how to choose the pull configuration for a button or other
 input circuit.
@@ -287,60 +353,89 @@ input circuit.
 3. **picotool** (Raspberry Pi's tool for inspecting and converting RP2350
    images), only needed for flashing. On macOS: `brew install picotool`.
    Verified with picotool v2.3.0.
+4. **cargo-generate** 0.23.4 or later, only needed to create an
+   application from `templates/`: `cargo install cargo-generate`. Verified
+   with cargo-generate 0.23.14.
 
 ## Building
 
+The workspace itself is architecture-neutral: `.cargo/config.toml` sets no
+target, only an alias. From the repository root:
+
 ```sh
+cargo build                 # api, for the host (the default member)
+cargo pico2                 # pico2, for thumbv8m.main-none-eabihf
+```
+
+`cargo pico2` is `cargo build -p pico2 --target thumbv8m.main-none-eabihf`.
+Both crates are libraries, so neither command links a firmware image.
+
+An application is built from its own crate. Generate one from the Pico 2
+template, then build it there:
+
+```sh
+cargo generate --git https://github.com/robinonsay/rustos templates/pico2
+cd <project-name>
 cargo build --release
 ```
 
-That is the whole command: `.cargo/config.toml` in the repository root sets
-the target triple and the linker-script arguments, so no extra flags are
-needed. The linker prints a memory report as part of the build. As of this
-commit it reads:
+The generated `.cargo/config.toml` sets the target triple and the linker
+arguments (`-Tlink.ld`, a memory report, and a `firmware.map` link map),
+and `pico2`'s `build.rs` puts `link.ld` on the linker search path. The
+linker prints the memory report as part of the build. For the template's
+blinky, as of this commit, it reads:
 
 ```
 Memory region         Used Size  Region Size  %age Used
-            FLASH:        2096 B         4 MB      0.05%
+            FLASH:        2028 B         4 MB      0.05%
               RAM:        8200 B       520 KB      1.54%
 ```
 
 (These numbers change whenever the code does; the report printed by your own
 build is the authoritative one.) The build also emits one `linker_messages`
-warning attributed to `demo` — that is expected; it is how Cargo surfaces the
-memory report above.
+warning attributed to the application crate — that is expected; it is how
+Cargo surfaces the memory report above.
 
 ## Flashing
 
-The build output is an **ELF** file (the standard executable format the
-linker produces). The Pico 2's bootrom accepts drag-and-drop flashing in the
-**UF2** format, so convert first. picotool identifies file types by
-extension, so give the ELF a `.elf` name before converting:
+Hold the **BOOTSEL** button on the Pico 2 while plugging in its USB cable,
+then, from the application's directory:
 
 ```sh
-cp target/thumbv8m.main-none-eabihf/release/demo blinky.elf
-picotool uf2 convert blinky.elf blinky.uf2 --family rp2350-arm-s
+cargo run --release
 ```
 
-Then hold the **BOOTSEL** button on the Pico 2 while plugging in its USB
-cable. The board enumerates as a USB mass-storage drive; copy `blinky.uf2`
-onto that drive. The board reboots itself and the onboard LED blinks.
-Alternatively, with the board in BOOTSEL mode: `picotool load blinky.uf2`
-followed by `picotool reboot`.
+The template sets `picotool load -u -x -t elf` as the runner, so this
+builds the image, writes it to flash (`-u` skips sectors that already
+match), and starts it (`-x`). The onboard LED blinks.
 
-The `blinky.elf` and `blinky.uf2` files committed at the repository root were
-verified (2026-08-30) to be byte-identical to a fresh `cargo build --release`
-and conversion, so you can flash `blinky.uf2` directly without building.
+To flash without picotool, convert the image to **UF2**, the format the
+Pico 2's bootrom accepts by drag-and-drop. The build output is an **ELF**
+file (the standard executable format the linker produces), with no
+extension; picotool identifies file types by extension, so give it a `.elf`
+name before converting:
+
+```sh
+cp target/thumbv8m.main-none-eabihf/release/<project-name> app.elf
+picotool uf2 convert app.elf app.uf2 --family rp2350-arm-s
+```
+
+With the board in BOOTSEL mode it enumerates as a USB mass-storage drive;
+copy `app.uf2` onto that drive and the board reboots itself into it.
 
 ## Host-side tests
 
-The `api` crate is host-compilable, and the alias `cargo xtest` (defined in
-`.cargo/config.toml`) runs its test suite on the host instead of the embedded
-target. The alias hard-codes the `aarch64-apple-darwin` host triple, so as
-written it only runs on Apple-silicon macOS; on another host, substitute your
-own triple. The suite currently contains no unit tests; the alias is kept so
-that when tests are added to `api/`, `cargo xtest` will already compile and
-run them on the host with no further setup.
+The `api` crate is host-compilable, and its unit tests run on the host:
+
+```sh
+cargo test
+```
+
+`api` is the workspace's default member, so this runs its unit tests and
+doctests. If a `.cargo/config.toml` in an enclosing directory sets a
+build target (as one does when this repository is a submodule of a
+firmware project), name the host's own triple instead, for example
+`cargo test -p api --target aarch64-apple-darwin`.
 
 ## Learning path
 
@@ -355,15 +450,21 @@ The main learning path is the bare-metal tutorial:
 
 The primary hardware references live in `docs/`:
 `docs/rp2350-datasheet.pdf` (the microcontroller),
-`docs/pico-2-datasheet.pdf` (the board), and the Armv8-M and Cortex-M33
-manuals, with text extractions of each under `docs/extracted/`. The drivers
-cite them by section, table and page.
+`docs/pico-2-datasheet.pdf` (the board), the Armv8-M and Cortex-M33
+manuals, and the Pico C SDK and getting-started guides, with text
+extractions of each under `docs/extracted/`. The drivers cite them by
+section, table and page. `docs/` also holds the Pico 2 pinout, and the
+datasheets and specifications for the sensors, radio, GPS and SD card that
+applications built on RustOS drive.
 
 ## What is implemented
 
-**Implemented today:** the three-crate workspace described above — boot path,
-GPIO, clock, timer, SysTick, watchdog, USB serial and PWM drivers, portable traits, the
-board-definition macro, and the blinky demo. That is all of the code.
+**Implemented today:** the two-crate workspace and the templates described
+above — the boot path; the GPIO, clock, timer, SysTick, watchdog, USB
+serial, PWM, DMA, ADC, UART (polled and DMA), I2C, SPI and second-core
+drivers; the portable traits and the board-definition macro; the app,
+iLoad, scheduler, software-bus and time framework; and the blinky and
+app-module templates. That is all of the code.
 
 ## License
 

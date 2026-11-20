@@ -1,4 +1,4 @@
-//! Clock tree bring-up: crystal oscillator, both PLLs, and the four clock
+//! Clock tree bring-up: crystal oscillator, both PLLs, and the clock
 //! generators this crate uses.
 //!
 //! # What the chip runs on before this code
@@ -98,8 +98,8 @@ pub const CLK_REF_HZ: u32 = XOSC_HZ;
 /// rated maximum at the default core voltage (Table 540, p516).
 pub const CLK_SYS_HZ: u32 = PLL_SYS_CONFIG.output_hz();
 
-/// `clk_peri`: UART, SPI and other serial peripherals. Fed from `clk_sys`,
-/// undivided.
+/// `clk_peri`: the UART and SPI bit-rate clocks (`UARTCLK`, `SSPCLK`). Fed
+/// from `clk_sys`, undivided. I2C runs from `clk_sys` itself.
 pub const CLK_PERI_HZ: u32 = CLK_SYS_HZ;
 
 /// `clk_usb`: the USB controller. Must be exactly 48 MHz (Table 540,
@@ -365,7 +365,9 @@ const RESET_PLL_USB: u32 = 1 << 15;
 /// Zero-sized. [`new`](Self::new) consumes the board's
 /// `DeviceHandle<Rp2350Clocks>`, so the setup runs exactly once per boot;
 /// drivers that need a particular frequency ([`crate::timer`],
-/// [`crate::watchdog`], [`crate::usb`]) take `&Rp2350Clocks`, which makes
+/// [`crate::systick`], [`crate::watchdog`], [`crate::uart`], [`crate::spi`],
+/// [`crate::i2c`], [`crate::pwm`], [`crate::adc`], [`crate::usb`]) take
+/// `&Rp2350Clocks`, which makes
 /// "configure the clocks first" a type error to forget.
 pub struct Rp2350Clocks {
     _private: (),
@@ -375,11 +377,13 @@ impl Rp2350Clocks {
     /// Bring up the XOSC, both PLLs, `clk_ref`, `clk_sys`, `clk_peri` and
     /// `clk_usb` as described in the [module documentation](self).
     ///
-    /// Call this first, before any other driver: it changes the frequency
+    /// Call this first, before any other driver except safety-critical GPIO
+    /// outputs (see below): it changes the frequency
     /// of everything. It busy-waits for the crystal (about 6 ms) and the
-    /// two PLL locks. If the crystal never starts it waits forever; at this
-    /// point in boot no GPIO has been configured, so every pin is still a
-    /// high-impedance input.
+    /// two PLL locks. If the crystal never starts it waits forever, and
+    /// every pin stays as the code before this call left it: an output
+    /// configured first, as [`crate::watchdog`] advises for safety-critical
+    /// outputs, keeps its level.
     pub fn new(_handle: DeviceHandle<Rp2350Clocks>) -> Self {
         unsafe { init() };
         Self { _private: () }

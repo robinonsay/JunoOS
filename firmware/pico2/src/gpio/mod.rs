@@ -32,8 +32,10 @@
 //!
 //! `IoBank`, `PadsBank` and `GpioRegs` are `pub(crate)` rather than
 //! private because a pin is routed to any peripheral through these same two
-//! blocks: the PWM driver ([`crate::pwm`]) selects its function on a pin with
-//! the same `PADS_BANK0` / `IO_BANK0` sequence the GPIO driver uses for SIO.
+//! blocks: the PWM driver ([`crate::pwm`]), the ADC driver ([`crate::adc`])
+//! and the serial-bus pin routing in `common::pinmux` select a pin's function
+//! with the same `PADS_BANK0` / `IO_BANK0` sequence the GPIO driver uses for
+//! SIO.
 //!
 //! `#[repr(C)]` is mandatory on every struct here. It is what fixes field
 //! order and offsets to the declaration order; without it the compiler is free
@@ -48,7 +50,7 @@
 //! shared, slower peripheral bus: an access costs 3–4 cycles, versus 1 for
 //! the core-local SIO port described at `Sio` below — gets 4 kB of address
 //! space,
-//! aliased four ways (§2.1.3, p26):
+//! aliased four ways (§2.1.3, p27):
 //!
 //! | Address     | Effect on write        |
 //! |-------------|------------------------|

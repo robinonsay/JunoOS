@@ -16,7 +16,7 @@
 //! other answer starts the sequence again from the first 0. Before each 0,
 //! core 0 first empties the FIFO from core 1 and wakes core 1, which may be
 //! waiting for room to send. Once core 1 has taken all six, it sets its
-//! stack pointer and `VTOR` from words 4 and 5 and jumps to word 6.
+//! `VTOR` from word 4 and its stack pointer from word 5, and jumps to word 6.
 //!
 //! The repeated zeros and the start-over rule make the sequence robust to
 //! where a recently reset core 1 is when it begins: "anywhere in its boot

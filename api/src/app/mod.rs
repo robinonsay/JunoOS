@@ -67,7 +67,9 @@ pub trait App {
 
     /// Do one period's work. Called once per scheduled slot; must finish
     /// well within the scheduler's minor frame, because the scheduler
-    /// cannot interrupt it.
+    /// cannot interrupt it. An app that needs longer is registered for a
+    /// run of several frames
+    /// ([`TdmSchBuilder::register_span`](crate::sch::TdmSchBuilder::register_span)).
     fn on_process(&mut self) -> Result<(), Self::Error>;
 
     /// Release resources and leave outputs safe. Called at most once,
@@ -90,7 +92,8 @@ pub enum Hook {
 /// Implemented automatically for every [`App`]; never implement it by hand.
 /// A hook's error, if any, is handed to `report` as a `&dyn Error` while it
 /// is still alive — no allocation, and the full error stays available for
-/// logging. Each method returns `true` if the hook succeeded.
+/// logging. [`run_hook`](Self::run_hook) returns `true` if the hook
+/// succeeded.
 pub trait DynApp {
     /// Run `hook`, passing its error, if it fails, to `report`.
     fn run_hook(&mut self, hook: Hook, report: &mut dyn FnMut(&dyn Error)) -> bool;

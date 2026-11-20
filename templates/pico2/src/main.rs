@@ -51,8 +51,10 @@ fn main() -> ! {
     }
 }
 
-/// Busy-wait long enough for a blink to be visible. There is no configured
-/// timer yet; the count is calibrated by eye.
+/// Busy-wait long enough for a blink to be visible; the count is calibrated
+/// by eye. It keeps this example to GPIO alone: for a measured delay, bring
+/// up `pico2::clocks::Rp2350Clocks` and then `pico2::timer::Rp2350Timer`,
+/// whose `delay_ms` waits on the 1 µs system timer.
 fn delay() {
     for _ in 0..5_000_000 {
         spin_loop();

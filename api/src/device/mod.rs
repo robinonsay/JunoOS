@@ -17,6 +17,9 @@
 //! [`define_board!`](crate::define_board), the macro a chip-support crate
 //! invokes to declare which pins and peripherals its board actually has and
 //! to generate the one place handles are created.
+//!
+//! The [`driver`] submodule holds [`driver::Driver`], the trait a chip
+//! driver implements to be written one value type and read another.
 pub mod driver;
 use core::marker::PhantomData;
 
@@ -116,7 +119,7 @@ impl<const N: usize> PinHandle<N> {
 /// [`PinHandle`]'s zero-sized-type explanation): the value occupies zero
 /// bytes, and handles for different peripherals are unrelated types —
 /// `DeviceHandle<Rp2350Gpio>` cannot be passed where a
-/// `DeviceHandle<Rp2350Uart>` is required. One generic type in this crate
+/// `DeviceHandle<Rp2350Uart<0>>` is required. One generic type in this crate
 /// therefore covers every peripheral on every chip; the chip-support crate
 /// never defines its own token types, it only names its driver types inside
 /// the parameter.
@@ -164,10 +167,10 @@ impl<T> DeviceHandle<T> {
 /// A chip-support crate invokes this once with a board type name, a pins
 /// type name, a `name: number` list of the pins actually wired on that
 /// board, and an optional `devices` section listing one `name: DriverType`
-/// entry per peripheral. The `pico2` crate declares `gpio0`–`gpio22` plus
-/// semantic names (`led: 25`, `vbus_sense: 24`, ...) for the pins the
-/// Pico 2 commits to on-board functions, and `gpio: Rp2350Gpio` as its
-/// first device.
+/// entry per peripheral. The `pico2` crate declares `gpio0`–`gpio22` and
+/// `gpio26`–`gpio28` for the header pins, semantic names (`led: 25`,
+/// `vbus_sense: 24`, ...) for the pins the Pico 2 commits to on-board
+/// functions, and `gpio: Rp2350Gpio` as its first device.
 ///
 /// # What it expands to
 ///
@@ -253,14 +256,21 @@ macro_rules! define_board {
         /// out (into a GPIO factory method, say) consumes that pin's handle
         /// for the rest of the boot.
         pub struct $pins {
-            $(pub $pin_name: $crate::device::PinHandle<$n>,)+
+            $(
+                #[doc = concat!("The `PinHandle` for GPIO ", stringify!($n), ".")]
+                pub $pin_name: $crate::device::PinHandle<$n>,
+            )+
         }
         /// The board singleton. Obtain it with `take()`, exactly once per
         /// boot; the pin handles live in `pins`, and each declared device's
         /// `DeviceHandle` is a field of its own.
         pub struct $board {
+            /// The board's pin handles, one field per declared pin.
             pub pins: $pins,
-            $($(pub $dev_name: $crate::device::DeviceHandle<$dev_ty>,)+)?
+            $($(
+                #[doc = concat!("The `DeviceHandle` for `", stringify!($dev_ty), "`.")]
+                pub $dev_name: $crate::device::DeviceHandle<$dev_ty>,
+            )+)?
         }
 
         impl $board {

@@ -35,7 +35,7 @@
 //! RCP, SIO, XIP and USB). The register descriptions agree: `CTRL.TIME` "indicates
 //! the time in usec before a watchdog reset", and `LOAD`'s maximum
 //! `0xffffff` "corresponds to approximately 16 seconds" (Tables 1247–1248,
-//! p1194–1195) — 16.7 million µs, i.e. one count per microsecond tick. The
+//! p1194–1195) — 16.8 million µs, i.e. one count per microsecond tick. The
 //! SDK accordingly uses a scale factor of 1 on RP2350 and 2 only on RP2040.
 //! Not verified on hardware.
 //!

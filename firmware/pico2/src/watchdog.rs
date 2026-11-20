@@ -12,7 +12,7 @@
 //!
 //! On RP2350 the counter is `CTRL.TIME`, loaded from `LOAD`, and counts down
 //! once per microsecond tick (Tables 1247–1248, p1194–1195), up to
-//! `0xffffff` µs ≈ 16.7 s ([`MAX_TIMEOUT_US`]).
+//! `0xffffff` µs ≈ 16.8 s ([`MAX_TIMEOUT_US`]).
 //!
 //! # The tick, and the RP2040 double count
 //!
@@ -203,9 +203,9 @@
 
 use api::common::ErrorType;
 use api::device::DeviceHandle;
+use api::time::Duration;
 // Aliased: in this module `Watchdog` names the register layout and
 // `ResetReason` this driver's own, more detailed, reset reason.
-use api::time::Duration;
 use api::watchdog::{ResetReason as PortableReason, Watchdog as WatchdogTrait};
 
 use crate::clocks::{CLK_REF_HZ, CLK_SYS_HZ, Rp2350Clocks};
@@ -213,7 +213,7 @@ use crate::common::reg::RegAddr;
 use crate::common::reset::{clr_reset_reg, wait_for_reset_done};
 use crate::timer::{TickDestination, start_tick};
 
-/// Longest timeout `LOAD` can hold: `0xffffff` µs, about 16.7 s
+/// Longest timeout `LOAD` can hold: `0xffffff` µs, about 16.8 s
 /// (Table 1248, p1195).
 pub const MAX_TIMEOUT_US: u32 = 0x00ff_ffff;
 
@@ -680,8 +680,12 @@ impl ErrorType for Rp2350Watchdog {
 
 /// The portable watchdog interface. Each method is the inherent one of the
 /// same name (in microseconds, the counter's unit); see those for the
-/// register-level detail. A [`Duration`] is converted to microseconds
-/// rounding **up**, so the watchdog never fires earlier than asked, and
+/// register-level detail. `reset_reason` maps the inherent one through
+/// [`portable_reason`]. The two without one are `max_timeout`, which is
+/// [`MAX_TIMEOUT_US`], and `time_remaining`, which is
+/// [`time_remaining_us`](Rp2350Watchdog::time_remaining_us) while the
+/// watchdog runs and `None` while it does not. A [`Duration`] is converted
+/// to microseconds rounding **up**, so the watchdog never fires earlier than asked, and
 /// whole microseconds convert back to a `Duration` exactly enough that
 /// the round trip is unchanged.
 impl WatchdogTrait for Rp2350Watchdog {

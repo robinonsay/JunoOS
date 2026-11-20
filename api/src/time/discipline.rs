@@ -8,7 +8,7 @@
 //! * the **source** `S`, a hardware counter that never stops or jumps but
 //!   runs at its crystal's rate, a few tens of parts per million off;
 //! * the **output** `M`, what [`Clock::now`] returns: the source, rescaled.
-//!   It starts at the source's reading and is never stepped, so its
+//!   It reads 0 when the clock is created and is never stepped, so its
 //!   readings only ever increase, and timestamps taken from it can be
 //!   subtracted and sorted. Its rate is steered so that its seconds are
 //!   the reference's seconds;
@@ -53,9 +53,10 @@
 //! every Armv8-M core has.
 //!
 //! Only one `Discipliner` is ever handed out
-//! ([`DisciplinedClock::discipliner`]), so exactly one part of the system
-//! can steer the clock, and the compiler enforces it: everything else
-//! holds the clock and can only read it.
+//! ([`DisciplinedClock::discipliner`] returns `None` after the first
+//! call), so exactly one part of the system can steer the clock, and the
+//! compiler enforces the rest: everything else holds the clock and can
+//! only read it.
 
 use core::marker::PhantomData;
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering, fence};
@@ -75,8 +76,10 @@ pub struct DisciplineConfig {
     pub step_threshold: Duration,
     /// The largest rate correction, in parts per billion, either way. A
     /// crystal is a few tens of ppm off; this bounds what a bad mark can do.
+    /// Keep it below 500 000 000 (50 %): the rate is held as an `i32` in
+    /// units of 2^-32.
     pub max_rate_ppb: u32,
-    /// With no mark for this long, a synchronized clock reports
+    /// With no mark for longer than this, a synchronized clock reports
     /// [`DisciplineState::Holdover`].
     pub holdover_after: Duration,
 }
@@ -108,8 +111,9 @@ pub enum DisciplineState {
     Free = 0,
     /// Marks are arriving: the output is being steered.
     Locked = 1,
-    /// Marks stopped arriving: the correlation and the learned frequency
-    /// still hold, and the error grows with the crystal's drift.
+    /// Marks stopped arriving: the correlation still holds and the output
+    /// keeps the rate the last mark set (the learned frequency plus that
+    /// mark's phase term), and the error grows with the crystal's drift.
     Holdover = 2,
 }
 
@@ -189,7 +193,8 @@ const fn ppb_to_q32(ppb: i64) -> i64 {
     (ppb << 32) / 1_000_000_000
 }
 
-/// Units of 2^-32 in parts per billion, rounded toward zero.
+/// Units of 2^-32 in parts per billion, rounded down (toward negative
+/// infinity).
 const fn q32_to_ppb(q: i64) -> i32 {
     ((q * 1_000_000_000) >> 32) as i32
 }
@@ -220,8 +225,8 @@ pub struct DisciplinedClock<S: Clock, M: ClockId, R: ClockId> {
 
 impl<S: Clock, M: ClockId, R: ClockId> DisciplinedClock<S, M, R> {
     /// A clock reading `source`, not yet synchronized: it reads 0 at
-    /// `source`'s current time and runs at `source`'s rate until the
-    /// first mark.
+    /// `source`'s current time and runs at `source`'s rate until marks
+    /// steer it (the first mark only sets the correlation).
     pub fn new(source: S, config: DisciplineConfig) -> Self {
         let clock = Self {
             config,

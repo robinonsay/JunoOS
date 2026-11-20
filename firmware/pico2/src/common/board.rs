@@ -30,7 +30,8 @@
 //!   ([`Rp2350Adc`]), and one handle per serial-bus instance: `uart0`/`uart1`
 //!   ([`Rp2350Uart<0>`](Rp2350Uart)/`<1>`), `i2c0`/`i2c1`
 //!   ([`Rp2350I2c`]) and `spi0`/`spi1` ([`Rp2350Spi`]). Those drivers
-//!   except DMA also take a `&Rp2350Clocks` (and USB a `&Rp2350Timer`), so
+//!   except `clocks` itself and DMA also take a `&Rp2350Clocks` (and USB a
+//!   `&Rp2350Timer`), so
 //!   the type system enforces the bring-up order: clocks first, then
 //!   timer, SysTick, watchdog, PWM, the ADC and the serial buses, then USB.
 //!   An ADC stream also takes a channel from the DMA. The serial-bus

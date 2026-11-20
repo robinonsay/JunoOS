@@ -73,8 +73,11 @@
 //! ([§12.3.4.6.1, p1049](../../../docs/rp2350-datasheet.pdf#page=1049);
 //! [Table 1099, p1059](../../../docs/rp2350-datasheet.pdf#page=1059)).
 //! [`SpiClock::for_frequency`] takes the smallest prescale for which some
-//! `SCR` reaches the requested rate, and the smallest such `SCR`: the
-//! fastest rate not above the request. At 150 MHz that spans
+//! `SCR` reaches the requested rate, and the smallest such `SCR`, so the
+//! rate is never above the request. From `SSPCLK / 512` up (about
+//! 293 kHz at 150 MHz) the prescale is 2 and the rate is the fastest not
+//! above the request; below that a larger prescale can land under 1 %
+//! slower than the best pair would. At 150 MHz the accepted range is
 //! 2.3 kHz–75 MHz.
 //!
 //! # Transfers
@@ -197,8 +200,9 @@ pub struct SpiClock {
 }
 
 impl SpiClock {
-    /// The divisors for the fastest rate not above `hz` with `SSPCLK` =
-    /// `clk_hz`, or `None` if `hz` is outside
+    /// The divisors for a rate not above `hz` with `SSPCLK` = `clk_hz`
+    /// (chosen as in [Bit rate](crate::spi#bit-rate)), or `None` if `hz`
+    /// is outside
     /// [`MIN_FREQUENCY_HZ`]–[`MAX_FREQUENCY_HZ`] (for this crate's
     /// `clk_peri`).
     pub const fn for_frequency(clk_hz: u32, hz: u32) -> Option<Self> {
@@ -260,7 +264,8 @@ const _: () = assert!(SpiClock::for_frequency(CLK_PERI_HZ, MIN_FREQUENCY_HZ - 1)
 /// Bus settings for [`Rp2350Spi::new`] and [`Rp2350Spi::set_config`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SpiConfig {
-    /// Requested bit rate; the fastest rate not above it is used.
+    /// Requested bit rate; the rate used is never above it (see
+    /// [Bit rate](crate::spi#bit-rate)).
     pub frequency_hz: u32,
     /// Clock polarity and phase.
     pub mode: Mode,

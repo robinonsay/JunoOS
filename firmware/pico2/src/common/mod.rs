@@ -1,8 +1,9 @@
 //! Fundamentals shared by every driver, depending on none of them.
 //!
-//! Two kinds of fact live here, at different levels. [`reg`] and [`reset`]
-//! are *chip* facts: peripheral base addresses and the subsystem reset
-//! controller, true of any RP2350. [`board`] and [`MAX_GPIO_PIN`] are
+//! Two kinds of fact live here, at different levels. [`reg`], [`reset`] and
+//! the crate-private `pinmux` are *chip* facts: peripheral base addresses,
+//! the subsystem reset controller, and which GPIO can carry which serial-bus
+//! signal, true of any RP2350. [`board`] and [`MAX_GPIO_PIN`] are
 //! *board/package* facts: which pins the Pico 2 actually has and what its
 //! circuitry wired them to.
 

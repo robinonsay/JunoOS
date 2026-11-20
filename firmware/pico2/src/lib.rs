@@ -3,12 +3,13 @@
 //! This crate is a **library**, not a binary. It owns everything that has to
 //! happen before and around user code — the boot metadata block, the vector
 //! table, the reset handler, and the drivers — and calls out to an application
-//! that lives in a separate binary crate. The application supplies one
-//! function; this crate supplies everything else.
+//! that lives in a separate binary crate. The application supplies its entry
+//! function and a `#[panic_handler]`; this crate supplies everything else.
 //!
 //! ## Writing an application
 //!
-//! This mirrors the `demo` crate in this workspace (delays elided):
+//! This mirrors the blinky application `templates/pico2` generates
+//! (`src/main.rs`; its panic handler and delays elided):
 //!
 //! ```ignore
 //! #![no_std]
@@ -34,16 +35,21 @@
 //! The two crate attributes are required, not style. `#![no_std]`
 //! links only Rust's `core` library — the language items, with no operating
 //! system services — which is why there is no `println!`, no heap, and why
-//! this crate must supply the `#[panic_handler]`. `#![no_main]` is explained
-//! at [`entry!`].
+//! the application must supply a `#[panic_handler]` (this crate defines
+//! none, leaving panic policy to the application). `#![no_main]` is
+//! explained at [`entry!`].
 //!
 //! Building an application needs configuration as well as source: the
-//! `thumbv8m.main-none-eabihf` target and the `-Tlink.ld` linker flag. In
-//! this workspace `.cargo/config.toml` supplies both, and `pico2`'s
-//! `build.rs` puts `link.ld` on the linker search path — a crate outside the
-//! workspace must replicate that configuration (and first run
+//! `thumbv8m.main-none-eabihf` target and the `-Tlink.ld` linker flag. An
+//! application generated from `templates/pico2` carries a
+//! `.cargo/config.toml` that supplies both, and `pico2`'s `build.rs` puts
+//! `link.ld` on the linker search path. Any other application crate must
+//! replicate that configuration (and first run
 //! `rustup target add thumbv8m.main-none-eabihf`), or the build links for
-//! the host, or fails to link at all.
+//! the host, or fails to link at all. The workspace's own
+//! `.cargo/config.toml` sets no default target and no linker flag: its
+//! `cargo pico2` alias passes the target on the command line and builds
+//! this library, which needs no link step.
 //!
 //! `main` is an ordinary unattributed function taking no arguments: it claims
 //! the board singleton from [`common::board`] (whose `take` succeeds at most
@@ -82,10 +88,12 @@
 //! Arm:
 //!
 //! * **Cortex-M runtime** — `VECTOR_TABLE`, [`OnReset`], `enable_fpu`,
-//!   `VTOR`. Portable to any Armv8-M chip.
+//!   `VTOR`. Portable to any Armv8-M chip. [`systick`] drives the Arm
+//!   SysTick counter too, but takes the RP2350 clock tree for its rate.
 //! * **RP2350 chip support** — `BOOT_INFO`, [`common::reg`],
 //!   [`common::reset`], [`gpio`], [`clocks`], [`timer`], [`watchdog`],
-//!   [`usb`], [`pwm`], [`dma`], [`adc`], [`uart`], [`uart_dma`], [`i2c`], [`spi`], [`multicore`]. Portable to any RP2350 board, and notably
+//!   [`usb`], [`pwm`], [`dma`], [`adc`], [`uart`], [`uart_dma`], [`i2c`],
+//!   [`spi`], [`multicore`]. Portable to any RP2350 board, and notably
 //!   *not* Arm-specific: RP2350 can boot RISC-V Hazard3 cores instead, driving
 //!   these same registers (p14).
 //! * **Pico 2 board support** — [`common::board`], which declares exactly the
@@ -96,10 +104,10 @@
 //!   handles solely for pins 0–29 (see the constant's doc). See each item's
 //!   doc for why these live here.
 //!
-//! The `Board` type itself is generated in [`common::board`] by the `api`
+//! The board type, `Rp2350`, is generated in [`common::board`] by the `api`
 //! crate's `define_board!` macro; the application does not state board facts
-//! any more — the `demo` crate reaches the on-board LED as `board.pins.led`
-//! rather than by hard-coding pin 25.
+//! any more — the template application reaches the on-board LED as
+//! `board.pins.led` rather than by hard-coding pin 25.
 
 #![no_std]
 

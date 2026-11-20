@@ -32,7 +32,8 @@ pub struct HealthTlm<Id> {
     pub runs: u32,
     /// Runs that failed so far.
     pub failures: u32,
-    /// The most recent failure, if any.
+    /// The most recent failure, or the bring-up error until the first
+    /// failure; `None` if neither. Kept after later successful runs.
     pub last_error: Option<ErrorKind>,
 }
 

@@ -135,7 +135,9 @@
 //! * EP2 IN/OUT: DATA0 after SET_CONFIGURATION, after
 //!   CLEAR_FEATURE(ENDPOINT_HALT) and after SET_INTERFACE, alternating per
 //!   completed packet. An EP2 IN packet that was armed but not yet sent
-//!   when the toggle is reset is re-armed as DATA0 rather than lost.
+//!   when a halt request or SET_INTERFACE resets the toggle is re-armed as
+//!   DATA0 rather than lost. SET_CONFIGURATION instead empties both byte
+//!   buffers (see [Link state](#link-state)).
 //!
 //! An OUT packet whose PID does not match the buffer control word is
 //! rejected by the controller (`SIE_STATUS.DATA_SEQ_ERROR`, §12.7.3.8.3,
@@ -357,9 +359,11 @@ impl Rp2350Usb {
     /// itself only happens while [`poll`](Self::poll) is called. Blocks for
     /// about 10 ms (the disconnect pulse).
     ///
-    /// `&Rp2350Clocks` proves `clk_usb` runs at 48 MHz; `timer` provides
-    /// the delay. `config` supplies the vendor and product IDs and the
-    /// three strings the host displays.
+    /// `_handle` is the board's one claim on the controller (`board.usb`),
+    /// so the driver can be constructed at most once. `&Rp2350Clocks`
+    /// proves `clk_usb` runs at 48 MHz; `timer` provides the delay.
+    /// `config` supplies the vendor and product IDs and the three strings
+    /// the host displays.
     pub fn new(
         _handle: DeviceHandle<Rp2350Usb>,
         _clocks: &Rp2350Clocks,
@@ -463,9 +467,10 @@ impl Rp2350Usb {
     /// there is no session to deliver the bytes to, and the buffers are
     /// cleared when one starts.
     ///
-    /// Bytes go out in 64-byte packets as the host asks for them. When the
-    /// queue runs empty right after a full 64-byte packet, a zero-length
-    /// packet follows, so the host's read completes immediately
+    /// Bytes go out in packets of up to 64 bytes as the host asks for them,
+    /// one packet per [`poll`](Self::poll) at most. When the queue runs
+    /// empty right after a full 64-byte packet, a zero-length packet
+    /// follows, so the host's read completes immediately
     /// ([`bulk_in_needs_zlp`]).
     pub fn write(&mut self, data: &[u8]) -> usize {
         if !self.control.is_configured() {

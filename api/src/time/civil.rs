@@ -36,7 +36,9 @@ impl ClockId for Met {
 /// A UTC date and time of day, to the millisecond.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Civil {
-    /// Year, 1970 to 2105.
+    /// Year, 1970 to 2105. ([`Time::to_civil`] gives 2106 for times from
+    /// 2106-01-01 to the end of a `Time`'s range, 2106-02-07;
+    /// [`Time::from_civil`] rejects them.)
     pub year: u16,
     /// Month, 1 to 12.
     pub month: u8,
@@ -97,8 +99,8 @@ const fn days_in_month(year: u16, month: u8) -> u8 {
 }
 
 impl Time<Utc> {
-    /// The UTC time `civil` names, its millisecond rounded up to the next
-    /// 2^-32 s, or `None` if any field is out of range
+    /// The UTC time `civil` names, its millisecond rounded up to a whole
+    /// 2^-32 s unit, or `None` if any field is out of range
     /// (including dates outside 1970 to 2105, and 31 April).
     pub const fn from_civil(civil: &Civil) -> Option<Self> {
         let c = civil;

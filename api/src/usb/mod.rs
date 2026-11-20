@@ -3,7 +3,7 @@
 //! Everything in this module is pure computation on bytes. It never touches
 //! a register, so it compiles for the host and every byte it produces is
 //! pinned down by the unit tests at the bottom of each file. The chip driver
-//! owns the hardware half: it moves packets
+//! (`pico2::usb` for the RP2350) owns the hardware half: it moves packets
 //! between the USB controller and these functions, and applies the
 //! [`control::Effect`]s they ask for.
 //!
@@ -82,7 +82,9 @@
 //! | [`descriptor`] | The configurable device descriptor, the fixed CDC-ACM configuration descriptor, string descriptors. |
 //! | [`cdc_acm`] | Class request codes, line coding, control-line state. |
 //! | [`control`] | [`control::ControlHandler`]: the endpoint-0 request state machine. |
-//! | [`ring`] | [`ring::ByteRing`], the fixed-capacity byte FIFO used for the serial stream. |
+//!
+//! The fixed-capacity byte FIFO a driver uses to buffer the serial stream is
+//! [`ByteRing`](crate::common::ring::ByteRing), outside this module.
 //!
 //! # References
 //!

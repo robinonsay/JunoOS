@@ -16,9 +16,12 @@
 //!
 //! 1. drains its **outbound** pipes — one per message id the other side
 //!    wants, subscribed to the local broker — into its queue to the other
-//!    side, and
-//! 2. publishes everything waiting in the queue **from** the other side on
-//!    the local broker, under the id it was sent with.
+//!    side,
+//! 2. publishes what is waiting in the queue **from** the other side on
+//!    the local broker, under the id it was sent with — all of it, unless
+//!    [`with_max_inbound`](IpcApp::with_max_inbound) set a cap, and
+//! 3. on the runs [`with_report`](IpcApp::with_report) asked for, if any,
+//!    publishes its own [`IpcStats`] on the local broker.
 //!
 //! The queues are [`heapless::spsc`]: one side only enqueues and the other
 //! only dequeues, through atomic loads and stores, so neither side ever
@@ -29,8 +32,11 @@
 //!
 //! An app never waits. When the queue to the other side is full, the
 //! `IpcApp` stops draining its pipes, leaving messages there; the pipes are
-//! the overflow buffer. When a pipe fills too, the bus drops new messages
-//! for it and the pipe counts them, and the next run reports them as
+//! the overflow buffer. Pipes are drained in the order of the `outbound`
+//! slice, each until it is empty or the queue is full, so when room is
+//! short the earlier pipes go first. When a pipe fills too, the bus drops
+//! new messages for it and the pipe counts them, and the next run reports
+//! them as
 //! [`IpcStats::pipe_drops`] and as an error to the scheduler.
 //!
 //! # When this side falls behind
@@ -48,7 +54,9 @@
 //! the same id, each would republish what the other sent and send it
 //! back, forever. An `IpcApp` refuses — counts in [`IpcStats::looped`] and
 //! does not publish — any message from the other side whose id it also
-//! forwards outbound.
+//! forwards outbound, and reports them as [`IpcError::Looped`]. A refused
+//! message still counts toward the [`with_max_inbound`](IpcApp::with_max_inbound)
+//! cap.
 
 use heapless::spsc::{Consumer, Producer};
 
@@ -63,19 +71,23 @@ pub struct IpcStats {
     pub runs: u32,
     /// Messages sent to the other side.
     pub sent: u32,
-    /// Messages received from the other side and published locally.
+    /// Messages received from the other side and published locally,
+    /// whether or not a local subscriber took them.
     pub received: u32,
     /// Messages the bus dropped because an outbound pipe was full.
     pub pipe_drops: u32,
     /// Messages from the other side refused because their id also goes
     /// outbound (see [Loops](self#loops)).
     pub looped: u32,
-    /// Messages from the other side that a local subscriber refused.
+    /// Messages from the other side that at least one local subscriber
+    /// refused; counted once per message.
     pub undelivered: u32,
 }
 
 /// Why an [`IpcApp`] run reported a problem. The run itself always
-/// completes.
+/// completes. A run with both drops and looped messages reports
+/// [`Dropped`](Self::Dropped), the more serious. A local subscriber
+/// refusing a message ([`IpcStats::undelivered`]) is not an error here.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum IpcError {
     /// Outbound messages were dropped: the other side is not keeping up.
@@ -148,7 +160,9 @@ impl<'a, T, const N: usize> IpcApp<'a, T, N> {
     }
 
     /// Also publish the stats on the local bus every `runs` runs, as the
-    /// message `make` builds from them. `runs` of 0 is taken as 1.
+    /// message `make` builds from them, after the run's own work. `runs`
+    /// of 0 is taken as 1. A report that is refused is neither counted
+    /// nor reported as an error.
     pub fn with_report(mut self, runs: u32, make: ReportFn<T>) -> Self {
         self.report = Some((runs.max(1), make));
         self
@@ -228,7 +242,7 @@ mod tests {
     use super::*;
     use crate::sb::{ArrayBroker, Broker};
 
-    /// Two message ids, one per direction.
+    /// Two message ids, one per direction, and one for the stats report.
     const A_TO_B: Mid = 1;
     const B_TO_A: Mid = 2;
     const STATUS: Mid = 3;

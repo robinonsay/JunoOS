@@ -271,6 +271,12 @@ const RESET_I2C0_BIT: usize = 4;
 /// 10 ms. A byte at the slowest accepted rate, [`MIN_FREQUENCY_HZ`], takes
 /// 0.9 ms (9 clocks), so this only trips when a device holds SCL low
 /// (clock stretching) for longer than 10 ms, or the bus is stuck.
+///
+/// One exception: the wait for the STOP after the last command is queued
+/// has the same budget, while up to 16 queued bytes may still be in the
+/// transmit FIFO. Below about 15 kHz, a write that leaves more than 10 ms
+/// of bytes in the FIFO can therefore report [`I2cError::Timeout`] while
+/// the bus is still moving.
 pub const STALL_TIMEOUT_MS: u32 = 10;
 
 /// How many status reads span at least [`STALL_TIMEOUT_MS`]. "APB reads
@@ -462,7 +468,9 @@ pub enum I2cError {
     /// Aborted for another reason; the raw `IC_TX_ABRT_SOURCE` value
     /// (Table 1084, p1033–1038).
     Aborted(u32),
-    /// No byte moved for [`STALL_TIMEOUT_MS`]. The controller has been
+    /// No byte moved for [`STALL_TIMEOUT_MS`], or the final STOP or the
+    /// controller's disable did not come within it (see
+    /// [`STALL_TIMEOUT_MS`] for a slow-bus case). The controller has been
     /// reset and reprogrammed; the bus may still be held by a device.
     Timeout,
 }
@@ -528,7 +536,8 @@ impl<const I: usize> Rp2350I2c<I> {
     /// Table 644 is this controller; any other pin is a **build error**.
     /// On the Pico 2: I2C0 on GPIO0/1, 4/5, 8/9, 12/13, 16/17, 20/21,
     /// 24/25, 28/29; I2C1 on GPIO2/3, 6/7, 10/11, 14/15, 18/19, 22/23,
-    /// 26/27.
+    /// 26/27. The two pins need not be one of these pairs: any SDA pin of
+    /// the controller works with any of its SCL pins.
     pub fn new<const SDA: usize, const SCL: usize>(
         _handle: DeviceHandle<Self>,
         _clocks: &Rp2350Clocks,
