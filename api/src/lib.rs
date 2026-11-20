@@ -1,0 +1,135 @@
+//! # `api` — portable hardware-abstraction traits
+//!
+//! This crate is the **portability boundary** of the system. It contains the
+//! trait definitions the rest of the workspace is written against, plus the
+//! pin-ownership machinery in [`device`]: the zero-sized
+//! [`device::PinHandle`] and the [`define_board!`] macro that generates the
+//! board type creating one handle per physical pin, once per boot.
+//!
+//! Two Rust terms carry this whole crate, so first: a **trait** is a named
+//! set of function signatures — the compile-time counterpart of an
+//! interface. A type opts in by providing an `impl` block containing those
+//! functions, and generic code written against the trait (a bound such as
+//! `T: Write<bool>`) accepts any implementing type. A **register** is a
+//! hardware-defined word at a fixed memory address through which a
+//! peripheral is controlled; any code that can dereference such an address
+//! can reconfigure any peripheral, which is why pin ownership needs
+//! enforcement above the hardware — the job of [`device`].
+//!
+//! There are no register addresses and no dependency on any other crate in
+//! the workspace; the one external dependency is
+//! [`heapless`](https://docs.rs/heapless/0.9.3/heapless/), for the
+//! fixed-capacity queues of [`sb`]. An `unsafe fn` is one whose preconditions the compiler
+//! cannot verify: the caller must wrap the call in an `unsafe` block and is
+//! responsible for the obligations listed in the function's `# Safety`
+//! section. The only `unsafe fn`s this crate exposes are
+//! [`device::PinHandle::new`] and [`device::DeviceHandle::new`], the
+//! constructors that create a handle without a board; the crate's one
+//! `unsafe` block is the call to them in the code [`define_board!`]
+//! generates, which expands into the invoking crate and is the intended
+//! caller their Safety sections describe. Everything here
+//! compiles for the host as readily as it does for
+//! `thumbv8m.main-none-eabihf` — the compiler's name for the target: the
+//! Armv8-M Mainline instruction set of the RP2350's Cortex-M33 cores, no
+//! operating system, hardware floating point — which is what makes
+//! application logic written against these traits testable without hardware.
+//!
+//! ## Where this sits
+//!
+//! ```text
+//!   api          traits + define_board!, zero register access   <- you are here
+//!     ^
+//!     |  implemented by
+//!     |
+//!   pico2        Cortex-M runtime + RP2350 register access and drivers
+//!     ^
+//!     |  linked against
+//!     |
+//!   application  names a concrete driver, then drives it via the traits
+//! ```
+//!
+//! The arrow direction is the whole point: `api` never depends on `pico2`, so
+//! a driver for a completely different chip can implement the same traits.
+//! An application still has to name a concrete driver type somewhere — the
+//! `demo` crate constructs `Rp2350Gpio` and asks the board for its `led`
+//! pin — but past that point everything it does goes through these traits, so
+//! those naming lines are the only ones that change when the chip does.
+//!
+//! ## The modules, in reading order
+//!
+//! * [`common`] — the value-transfer vocabulary. [`common::ErrorType`] names
+//!   the single error type a peripheral reports; [`common::Read`] and
+//!   [`common::Write`] move values to and from a peripheral.
+//! * [`device`] — pin ownership. A [`device::PinHandle<N>`](device::PinHandle)
+//!   is a zero-sized value whose possession proves, at compile time, that
+//!   physical pin `N` exists on this board and is not owned anywhere else;
+//!   [`define_board!`] generates the board singleton that creates every
+//!   handle exactly once.
+//! * [`gpio`] — the first peripheral. [`gpio::Gpio`] is the factory trait
+//!   that consumes a `PinHandle` and returns a configured input or output
+//!   pin, typed by its pin number.
+//! * [`usb`] — chip-independent USB device logic for a CDC-ACM ("USB
+//!   serial") function: SETUP decoding, descriptor building, the endpoint-0
+//!   request state machine and a byte FIFO. Pure computation, unit-tested on
+//!   the host down to the exact bytes; the RP2350 register driver that uses
+//!   it lives in `pico2::usb`.
+//! * [`i2c`] and [`spi`] — controller traits for the two synchronous serial
+//!   buses: whole I2C transfers addressed to a 7-bit device address, and
+//!   full-duplex SPI byte transfers. A UART needs no trait of its own: it
+//!   is a byte stream, so it implements [`common::Read<u8>`](common::Read)
+//!   and [`common::Write<u8>`](common::Write).
+//! * [`pwm`] — a factory that turns a pin into a PWM output, and the
+//!   output's duty cycle in whole hardware steps.
+//! * [`adc`] — a stream of samples from one input at a fixed rate, and a
+//!   chip-independent [`adc::Sample`].
+//! * [`watchdog`] — start, feed and force a reset, and a chip-independent
+//!   [`watchdog::ResetReason`] for why the last reset happened.
+//! * [`error`] — an extensible error vocabulary: any error type implements
+//!   [`error::Error`] by naming its [`error::ErrorKind`].
+//! * [`app`] — the application lifecycle a scheduler drives
+//!   (`on_process`, `on_exit`), LibJuno's `APP_API_T` in Rust,
+//!   and [`app::Health`], the record every app keeps of its runs.
+//! * [`iload`] — configuration tables compiled into the image, checked at
+//!   compile time, and [`iload::Slot`], an app's place in the schedule.
+//! * [`sch`] — the [`sch::Scheduler`] trait and [`sch::TdmSch`], a
+//!   time-division-multiplexed cyclic executive, LibJuno's `SCH_API_T`.
+//! * [`sb`] — the software bus: apps publish messages by id, and each
+//!   subscriber drains its own fixed-size [`sb::Pipe`]. LibJuno's
+//!   `JUNO_SB_BROKER_API_T`.
+//! * [`multicore`] — starting a second core: the launch handshake of the
+//!   RP2350 bootrom as a state machine that never blocks, over a
+//!   [`multicore::Mailbox`] the chip crate supplies, tested on the host
+//!   against a model of the other core; the RP2350 driver that uses it is
+//!   `pico2::multicore`.
+//!
+//! ## Design notes
+//!
+//! Two conventions run through every trait here:
+//!
+//! * **Errors are an associated type, declared once per implementing type.**
+//!   See [`common::ErrorType`] for why this is a separate supertrait rather
+//!   than an associated type on each individual trait — both terms are
+//!   defined there.
+//! * **Traits are generic over the value type**, not the peripheral. A type
+//!   that can be written as both a `bool` and a `u8` implements
+//!   [`common::Write<bool>`](common::Write) and
+//!   [`common::Write<u8>`](common::Write) rather than exposing two named
+//!   methods.
+#![no_std]
+
+pub mod adc;
+pub mod app;
+pub mod common;
+pub mod device;
+pub mod error;
+pub mod gpio;
+pub mod i2c;
+pub mod iload;
+pub mod multicore;
+pub mod pwm;
+pub mod sb;
+pub mod sch;
+pub mod spi;
+pub mod time;
+pub mod usb;
+pub mod watchdog;

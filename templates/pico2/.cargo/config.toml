@@ -1,0 +1,13 @@
+# Build environment for the Raspberry Pi Pico 2 (RP2350, Cortex-M33).
+# The board dependency (`pico2`) ships the linker script; its build script
+# puts link.ld on the linker search path.
+[build]
+target = "thumbv8m.main-none-eabihf"
+
+[target.thumbv8m.main-none-eabihf]
+rustflags = [
+    "-C", "link-arg=-Tlink.ld",
+    "-C", "link-arg=--print-memory-usage",
+    "-C", "link-arg=-Map=firmware.map",
+]
+runner = "picotool load -u -x -t elf"

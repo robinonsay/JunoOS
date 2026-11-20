@@ -1,0 +1,169 @@
+//! Pico 2 board definition: every pin that exists, every peripheral device,
+//! and what the board has already wired some of the pins to.
+//!
+//! The `define_board!` invocation below is the only place in the system where
+//! pin- and device-ownership handles are created. It expands to four things:
+//!
+//! * **`Rp2350Pins`** — a struct with one `pub` field per physical pin, each
+//!   of type `api::device::PinHandle<N>` where `N` is that pin's number.
+//!   A `PinHandle` is zero-sized: it stores nothing and costs nothing at
+//!   runtime. Its value is what possession of it proves. The handle's one
+//!   field is private and its `new` is `unsafe`, so the only way safe code
+//!   obtains a `PinHandle<25>` is by moving it out of this struct — making
+//!   the handle compile-time evidence that pin 25 exists on this board and
+//!   that no other code owns it. Driver constructors such as
+//!   `Gpio::output_from_handle` take the handle *by value*, consuming it, so
+//!   each pin can be turned into a configured pin at most once.
+//!   (`PinHandle::new` is the one constructor available outside a board
+//!   definition; it is `const unsafe` because the caller, not the board,
+//!   must then guarantee the pin exists and is unowned.)
+//! * **`gpio: DeviceHandle<Rp2350Gpio>`** — one field per entry in the
+//!   `devices` section, the peripheral-level counterpart of a `PinHandle`:
+//!   a zero-sized claim on the whole GPIO port. `Rp2350Gpio::new` takes it
+//!   by value, so the driver can be constructed at most once, and hardware
+//!   bring-up (releasing the GPIO blocks from reset) happens there — when
+//!   the peripheral is claimed, not at `take()`. A peripheral no code claims
+//!   is never brought up. The other device handles work the same way:
+//!   `clocks` ([`Rp2350Clocks`]), `timer` ([`Rp2350Timer`]), `systick`
+//!   ([`Rp2350SysTick`]), `watchdog` ([`Rp2350Watchdog`]), `usb`
+//!   ([`Rp2350Usb`]), `pwm` ([`Rp2350Pwm`]), `dma` ([`Rp2350Dma`]) and `adc`
+//!   ([`Rp2350Adc`]), and one handle per serial-bus instance: `uart0`/`uart1`
+//!   ([`Rp2350Uart<0>`](Rp2350Uart)/`<1>`), `i2c0`/`i2c1`
+//!   ([`Rp2350I2c`]) and `spi0`/`spi1` ([`Rp2350Spi`]). Those drivers
+//!   except DMA also take a `&Rp2350Clocks` (and USB a `&Rp2350Timer`), so
+//!   the type system enforces the bring-up order: clocks first, then
+//!   timer, SysTick, watchdog, PWM, the ADC and the serial buses, then USB.
+//!   An ADC stream also takes a channel from the DMA. The serial-bus
+//!   drivers also take the `PinHandle` of every pin they use, and only
+//!   compile with pins that can carry their signals (RP2350 datasheet
+//!   Table 644; see `common::pinmux`). `core1` ([`Rp2350Core1`]) is the
+//!   right to start the second core, once; its `launch` takes a
+//!   `&Rp2350Timer` for its time limit.
+//! * **`Rp2350`** — the board struct, holding `pins: Rp2350Pins` and the
+//!   device handle fields.
+//! * **`Rp2350::take() -> Option<Rp2350>`** — the singleton constructor. It
+//!   flips a `static AtomicBool` with `compare_exchange`: one indivisible
+//!   read-modify-write, so exactly one caller can observe `false` and store
+//!   `true`. That matters because the RP2350 has two Cortex-M33 cores
+//!   sharing memory — see the "Why `compare_exchange`, not a load followed
+//!   by a store" note on `define_board!` in `api::device`. The first caller
+//!   gets `Some` with the full set of handles and every later call — from
+//!   anywhere, including the other core — gets `None`. That single runtime
+//!   check is the root of the ownership scheme: handles are constructed
+//!   exactly once per boot, inside `take()`, and every guarantee after that
+//!   point is enforced by moves, at compile time, for free.
+//!
+//! ## Why some pins have semantic names
+//!
+//! The field names answer the question "what is safe to wire external
+//! hardware to?". The RP2350A package bonds out GPIO0–29, but the Pico 2
+//! board commits four of those to its own circuitry and does not route them
+//! to the 40-pin header. A field named `gpioN` is a free pin on the header; a
+//! field with a semantic name is already committed to on-board circuitry,
+//! and the name says to what:
+//!
+//! Two rails appear below: VBUS is the 5 V arriving over the USB connector,
+//! and VSYS is the board's main input rail (VBUS or an external supply),
+//! which the on-board SMPS — switched-mode power supply, the regulator —
+//! converts to the 3.3 V the chip runs on. Two peripheral terms appear too:
+//! PWM is pulse-width modulation — here, the regulator switching at a fixed
+//! rate regardless of load — and an ADC is an analog-to-digital converter,
+//! so an "ADC input" pin can be sampled as a voltage, not just as high/low.
+//!
+//! | Field | GPIO | Board function |
+//! |-------|------|----------------|
+//! | `smps_ps` | 23 | Output to the SMPS power-save pin: low lets the regulator drop into pulse-skipping mode at light load (efficient, but more output ripple); high forces continuous PWM mode (steadier 3.3 V, useful during ADC reads). |
+//! | `vbus_sense` | 24 | Input, reads high when VBUS power is present. |
+//! | `led` | 25 | Output driving the on-board user LED (high = lit). |
+//! | `vsys_adc` | 29 | ADC3 input wired to VSYS through a divider that reads VSYS/3, for measuring the supply voltage. Not on the header. |
+//!
+//! `gpio26`–`gpio28` are on the header and stay `gpioN`-named, but they are
+//! the three pins that double as ADC inputs 0–2, so prefer other pins for
+//! purely digital jobs.
+
+// `define_board!` expands to a `compare_exchange(false, true, Acquire,
+// Acquire)` spelled with the bare name, so the invoking module must have it
+// in scope. This import looks unused; the macro expansion consumes it.
+// `Acquire` is a memory ordering — see the "memory orderings" note on
+// `define_board!` in `api::device` for what an ordering is and what
+// `Acquire` forbids.
+use core::sync::atomic::Ordering::Acquire;
+
+use api::define_board;
+
+use crate::adc::Rp2350Adc;
+use crate::clocks::Rp2350Clocks;
+use crate::dma::Rp2350Dma;
+use crate::gpio::gpio::Rp2350Gpio;
+use crate::i2c::Rp2350I2c;
+use crate::multicore::Rp2350Core1;
+use crate::pwm::Rp2350Pwm;
+use crate::spi::Rp2350Spi;
+use crate::systick::Rp2350SysTick;
+use crate::timer::Rp2350Timer;
+use crate::uart::Rp2350Uart;
+use crate::usb::Rp2350Usb;
+use crate::watchdog::Rp2350Watchdog;
+
+define_board! {
+    Rp2350{
+        Rp2350Pins {
+            gpio0: 0,
+            gpio1: 1,
+            gpio2: 2,
+            gpio3: 3,
+            gpio4: 4,
+            gpio5: 5,
+            gpio6: 6,
+            gpio7: 7,
+            gpio8: 8,
+            gpio9: 9,
+            gpio10: 10,
+            gpio11: 11,
+            gpio12: 12,
+            gpio13: 13,
+            gpio14: 14,
+            gpio15: 15,
+            gpio16: 16,
+            gpio17: 17,
+            gpio18: 18,
+            gpio19: 19,
+            gpio20: 20,
+            gpio21: 21,
+            gpio22: 22,
+            // GP23–GP25 and GP29 are committed to on-board functions on the
+            // Pico 2 and are not routed to the 40-pin header; named for what
+            // the board wired them to rather than as free GPIO.
+            smps_ps: 23,     // SMPS power-save select
+            vbus_sense: 24,  // high when USB power is present
+            led: 25,         // on-board user LED
+            gpio26: 26,      // header, also ADC0
+            gpio27: 27,      // header, also ADC1
+            gpio28: 28,      // header, also ADC2
+            vsys_adc: 29,    // ADC3 reads VSYS/3; not on header
+        }
+        devices {
+            gpio: Rp2350Gpio,
+            clocks: Rp2350Clocks,
+            timer: Rp2350Timer,
+            systick: Rp2350SysTick,
+            watchdog: Rp2350Watchdog,
+            usb: Rp2350Usb,
+            pwm: Rp2350Pwm,
+            dma: Rp2350Dma,
+            adc: Rp2350Adc,
+            // Serial buses, one handle per hardware instance. The const
+            // parameter is the instance number, so `Rp2350Uart<0>` and
+            // `Rp2350Uart<1>` are distinct types with distinct handles.
+            // Base addresses: §2.2.4 (p32–33) of docs/rp2350-datasheet.pdf.
+            uart0: Rp2350Uart<0>,  // UART0, 0x4007_0000 (§12.1, p959)
+            uart1: Rp2350Uart<1>,  // UART1, 0x4007_8000
+            i2c0: Rp2350I2c<0>,    // I2C0,  0x4009_0000 (§12.2, p981)
+            i2c1: Rp2350I2c<1>,    // I2C1,  0x4009_8000
+            spi0: Rp2350Spi<0>,    // SPI0,  0x4008_0000 (§12.3, p1044)
+            spi1: Rp2350Spi<1>,    // SPI1,  0x4008_8000
+            // The right to start the second core (§5.3).
+            core1: Rp2350Core1,
+        }
+    }
+}

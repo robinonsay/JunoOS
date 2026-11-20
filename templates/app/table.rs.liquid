@@ -1,0 +1,59 @@
+//! The {{project-name | pascal_case}}App's iLoad: when it runs, and every value it is
+//! configured with.
+//!
+//! Every number the app uses lives here, never in its code. The table is
+//! compiled in, and [`check`]({{project-name | pascal_case}}Table::check) runs on [`DEFAULT`] at
+//! compile time, so a value out of range fails the build instead of the
+//! boot.
+
+use api::iload::{Slot, assert_ok};
+use api::sb::Mid;
+
+/// The minor frame of the core the app runs on, in milliseconds. Point it
+/// at the crate's own constant.
+const MINOR_FRAME_MS: u64 = 1;
+
+/// That core's major frame, in milliseconds. Point it at the crate's own
+/// constant.
+const MAJOR_FRAME_MS: u64 = 1000;
+
+/// How the {{project-name | pascal_case}}App runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct {{project-name | pascal_case}}Table {
+    /// Its schedule slot. Its health goes out once a second, every
+    /// [`hz`](Slot::hz) runs.
+    pub slot: Slot,
+    /// The message id its health goes out under.
+    pub health_mid: Mid,
+}
+
+impl {{project-name | pascal_case}}Table {
+    /// `Err` with the reason if any value is out of range.
+    pub const fn check(&self) -> Result<(), &'static str> {
+        if let Err(e) = self.slot.check(MINOR_FRAME_MS, MAJOR_FRAME_MS) {
+            return Err(e);
+        }
+        Ok(())
+    }
+}
+
+/// The values it runs with: every 100 ms, at the start of each period.
+pub const DEFAULT: {{project-name | pascal_case}}Table = {{project-name | pascal_case}}Table {
+    slot: Slot { period_ms: 100, offset_ms: 0, frames: 1 },
+    // Pick an id no other app publishes under.
+    health_mid: 0,
+};
+
+const _: () = assert_ok(DEFAULT.check());
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn out_of_range_slots_are_refused() {
+        assert_eq!(DEFAULT.check(), Ok(()));
+        let bad = Slot { period_ms: DEFAULT.slot.period_ms, offset_ms: DEFAULT.slot.period_ms, frames: 1 };
+        assert!({{project-name | pascal_case}}Table { slot: bad, ..DEFAULT }.check().is_err());
+    }
+}

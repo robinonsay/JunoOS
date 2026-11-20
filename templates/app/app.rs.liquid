@@ -1,0 +1,128 @@
+use api::app::{App, AppState, Health, HealthTlm};
+use api::error::ErrorKind;
+use api::sb::{Pipe, Publisher};
+
+use super::table::{{project-name | pascal_case}}Table;
+
+/// {{summary}}
+///
+/// Every run it takes everything waiting on its input pipe and does its
+/// period's work. Its health goes out once a second, from the first run,
+/// under [`health_mid`]({{project-name | pascal_case}}Table::health_mid), as the crate's
+/// message type: `M::from(record)`.
+pub struct {{project-name | pascal_case}}App<'a, Id, M, const N: usize> {
+    /// Its iLoad.
+    table: &'a {{project-name | pascal_case}}Table,
+    /// What it hears.
+    input: &'a Pipe<M, N>,
+    /// Where its health goes.
+    bus: &'a dyn Publisher<M>,
+    /// Runs since the schedule started, for the health interval.
+    runs: u32,
+    /// Run and failure counts.
+    health: Health<Id>,
+}
+
+impl<'a, Id: Copy, M, const N: usize> {{project-name | pascal_case}}App<'a, Id, M, N> {
+    /// The app `id` on `input`, configured by `table`, publishing on
+    /// `bus`. `main` registers its slot.
+    pub fn new(id: Id, table: &'a {{project-name | pascal_case}}Table, input: &'a Pipe<M, N>, bus: &'a dyn Publisher<M>) -> Self {
+        Self { table, input, bus, runs: 0, health: Health::new(id, None) }
+    }
+
+    /// The health record as of the last run.
+    pub const fn health(&self) -> HealthTlm<Id> {
+        self.health.get()
+    }
+
+    /// Act on one message from the input pipe.
+    fn handle(&mut self, _msg: M) -> Result<(), ErrorKind> {
+        // The app's work on each message goes here.
+        Ok(())
+    }
+}
+
+impl<Id: Copy, M, const N: usize> App for {{project-name | pascal_case}}App<'_, Id, M, N>
+where
+    M: From<HealthTlm<Id>>,
+{
+    type Error = ErrorKind;
+
+    fn on_process(&mut self) -> Result<(), ErrorKind> {
+        // Everything that arrived since the last run; the first failure is
+        // this run's.
+        let mut state = AppState::NoData;
+        let mut result = Ok(());
+        while let Some(msg) = self.input.pop() {
+            match self.handle(msg) {
+                Ok(()) => state = AppState::Ok,
+                Err(e) => result = result.and(Err(e)),
+            }
+        }
+        if result.is_err() {
+            state = AppState::Failing;
+        }
+        // Every run counts; the record goes out once a second. A pipe too
+        // full to take it counts the drop itself.
+        let record = self.health.record(state, result.err());
+        if self.runs.is_multiple_of(self.table.slot.hz().max(1)) {
+            let _ = self.bus.publish(self.table.health_mid, &M::from(record));
+        }
+        self.runs = self.runs.wrapping_add(1);
+        result
+    }
+
+    fn on_exit(&mut self) -> Result<(), ErrorKind> {
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use api::sb::{ArrayBroker, Broker, Mid};
+
+    use super::super::table::DEFAULT;
+    use super::*;
+
+    /// The messages of a crate with this app in it.
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    enum Msg {
+        Data(u32),
+        Health(HealthTlm<u8>),
+    }
+
+    impl From<HealthTlm<u8>> for Msg {
+        fn from(h: HealthTlm<u8>) -> Self {
+            Msg::Health(h)
+        }
+    }
+
+    /// The input pipe's message id.
+    const DATA: Mid = 100;
+
+    #[test]
+    fn drains_its_input_and_reports_once_a_second() {
+        let input: Pipe<Msg, 4> = Pipe::new(DATA);
+        let health: Pipe<Msg, 4> = Pipe::new(DEFAULT.health_mid);
+        let bus: ArrayBroker<'_, Msg, 2> = ArrayBroker::new();
+        bus.subscribe(&input).unwrap();
+        bus.subscribe(&health).unwrap();
+        let mut app = {{project-name | pascal_case}}App::new(7u8, &DEFAULT, &input, &bus);
+        // A message to handle, and the first run reports at once.
+        bus.publish(DATA, &Msg::Data(1)).unwrap();
+        assert_eq!(app.on_process(), Ok(()));
+        assert!(input.is_empty());
+        let Msg::Health(h) = health.pop().unwrap() else { panic!() };
+        assert_eq!((h.app, h.state, h.runs), (7, AppState::Ok, 1));
+        // Then nothing to handle, and no report until a second is up.
+        for _ in 1..DEFAULT.slot.hz() {
+            assert_eq!(app.on_process(), Ok(()));
+        }
+        assert!(health.is_empty());
+        assert_eq!(app.health().state, AppState::NoData);
+        assert_eq!(app.on_process(), Ok(()));
+        let Msg::Health(h) = health.pop().unwrap() else { panic!() };
+        assert_eq!(h.runs, DEFAULT.slot.hz() + 1);
+        assert_eq!(app.on_exit(), Ok(()));
+    }
+}
