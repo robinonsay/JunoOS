@@ -145,6 +145,7 @@ pub mod pwm;
 pub mod sb;
 pub mod sch;
 pub mod spi;
+pub mod sync;
 pub mod time;
 pub mod usb;
 pub mod watchdog;

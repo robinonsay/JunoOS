@@ -72,14 +72,16 @@
 //!    program counter) — see `VECTOR_TABLE`, which the linker script pins to
 //!    the flash base.
 //! 3. [`OnReset`] runs with flash mapped read-only over XIP and **RAM
-//!    uninitialised**: enable the FPU (the floating-point unit; see
+//!    uninitialised**: set core 0's stack limit (`MSPLIM`), make atomics
+//!    work between the cores (`enable_global_exclusives`), enable the FPU (the floating-point unit; see
 //!    `enable_fpu`), point `VTOR` at the table, copy `.data` from flash to
 //!    RAM (`reset_data`), zero `.bss` (`reset_bss` — both explained on those
 //!    functions below). (XIP is *execute-in-place*: the
 //!    QMI flash controller presents the flash contents as ordinary readable
 //!    memory starting at `0x1000_0000`, so the CPU fetches instructions
 //!    directly from flash with nothing copied to RAM first.)
-//! 4. `OnReset` tail-calls the application entry point, which never returns.
+//! 4. `reset_run`, where `OnReset` branches once the limit is set, tail-calls
+//!    the application entry point, which never returns.
 //!
 //! ## Layering note
 //!
@@ -176,6 +178,9 @@ unsafe extern "C" {
     /// this address is never itself dereferenced — which matters, because it
     /// is outside the decoded SRAM range and would bus-fault.
     static _stack_top: u32;
+    /// The lowest address core 0's stack may reach, just past `.bss`: its
+    /// `MSPLIM`. 8-byte aligned, as the register requires.
+    static _stack_bottom: u32;
 }
 
 unsafe extern "C" {
@@ -229,6 +234,13 @@ const PPB_BASE: usize = 0xE000_0000;
 /// Coprocessor Access Control Register, PPB offset `0x0ED88` (§3.7).
 const CPACR: *mut u32 = (PPB_BASE + 0x0ED88) as *mut u32;
 
+/// Auxiliary Control Register, PPB offset `0x0E008` (Table 187).
+const ACTLR: *mut u32 = (PPB_BASE + 0x0E008) as *mut u32;
+
+/// `EXTEXCLALL`, bit 29: exclusive accesses reach the global monitor without
+/// an MPU (Table 187).
+const ACTLR_EXTEXCLALL: u32 = 1 << 29;
+
 /// Vector Table Offset Register, PPB offset `0x0ED08`.
 const VTOR: *mut u32 = (PPB_BASE + 0x0ED08) as *mut u32;
 
@@ -266,6 +278,33 @@ unsafe fn enable_fpu() {
         let current = CPACR.read_volatile(); // READ
         let updated = current | CPACR_FPU_FULL; // MODIFY — preserves CP0/CP4/CP5/CP7
         CPACR.write_volatile(updated); // WRITE
+        core::arch::asm!("dsb", "isb", options(nostack, preserves_flags));
+    }
+}
+
+/// Make this core's exclusive accesses, and so every atomic
+/// read-modify-write, atomic against the other core.
+///
+/// Out of reset they are not: with no MPU no memory is Shareable, so
+/// "exclusive information is not sent on the AHB bus, HEXCL is 0, and only
+/// the local monitor is used" (Cortex-M33 user guide, "Exclusive tags"),
+/// and both cores' `compare_exchange` on one word can succeed.
+/// `ACTLR.EXTEXCLALL` sends them to the global monitor (§2.1.6, p28). It is
+/// per core, so each sets its own.
+///
+/// From then on an exclusive access outside SRAM never succeeds, and a loop
+/// on one never ends (§2.1.6.2, p29): keep atomics that are read, modified
+/// and written in SRAM, where every mutable `static` is.
+///
+/// # Safety
+///
+/// Writes a CPU control register. Call once on each core, before its first
+/// atomic read-modify-write.
+#[inline]
+unsafe fn enable_global_exclusives() {
+    unsafe {
+        let current = ACTLR.read_volatile();
+        ACTLR.write_volatile(current | ACTLR_EXTEXCLALL);
         core::arch::asm!("dsb", "isb", options(nostack, preserves_flags));
     }
 }
@@ -435,20 +474,41 @@ pub fn no_safe_state() {}
 /// On entry, `SP` is set from slot 0 but **RAM holds whatever survived the
 /// last power cycle**: `.data` is uninitialised and `.bss` is not zeroed. Any
 /// code that touches a static before those steps run reads garbage, which is
-/// why the four setup calls come first and in this order.
+/// why `reset_run`'s five setup calls come first and in this order.
 ///
-/// Diverges, and tail-calls the application entry point declared by
-/// [`entry!`]. Because that function is itself `-> !`, there is no trailing
-/// `loop {}`: "the application never returns" is enforced by the type system
-/// rather than by a fallback.
+/// Before them, and before anything uses the stack, it sets core 0's stack
+/// limit, `MSPLIM`, to `_stack_bottom`, as [`multicore`] does on core 1: a
+/// frame that would reach below it faults (a UsageFault with `STKOF` set,
+/// escalated to [`OnHardFault`]) instead of writing over `.bss`. It takes no
+/// stack itself: `#[unsafe(naked)]` gives it no prologue.
+///
+/// Diverges: it branches to `reset_run`, which tail-calls the application
+/// entry point declared by [`entry!`]. Because that function is itself
+/// `-> !`, there is no trailing `loop {}`: "the application never returns" is
+/// enforced by the type system rather than by a fallback.
 ///
 /// `extern "C"` and `#[no_mangle]` because `link.ld` names this symbol in its
 /// `ENTRY(OnReset)` directive, which both records the ELF entry point and
 /// gives `--gc-sections` a root to trace reachability from.
 #[unsafe(no_mangle)]
+#[unsafe(naked)]
 pub extern "C" fn OnReset() -> ! {
+    core::arch::naked_asm!(
+        "movw r0, :lower16:{bottom}",
+        "movt r0, :upper16:{bottom}",
+        "msr MSPLIM, r0",
+        "b {run}",
+        bottom = sym _stack_bottom,
+        run = sym reset_run,
+    )
+}
+
+/// Core 0's code after [`OnReset`]: sets up RAM and the processor, then runs
+/// the application.
+extern "C" fn reset_run() -> ! {
     unsafe {
         enable_fpu();
+        enable_global_exclusives();
         reset_vtor();
         reset_data();
         reset_bss();
@@ -476,8 +536,35 @@ pub extern "C" fn DefaultHandler() {
 /// lower-priority fault, or — most often during bring-up — a call through a
 /// null or garbage function pointer. Puts the application's outputs in their
 /// safe state first, as [`DefaultHandler`] does, then spins.
+///
+/// A stack overflow can leave no stack to do that on: if stacking the
+/// exception frame is what broke the limit, "the stack pointer is set to the
+/// stack limit value" (Armv8-M ARM, R_ZLZG), and the first push here would
+/// fault again and lock the processor up. So it first makes sure of
+/// [`FAULT_STACK`] bytes above this core's `MSPLIM`, over whatever was at
+/// the bottom of the stack, which nothing returns to. An MSR to `MSP` is not
+/// itself limit checked (R_BRLT).
 #[unsafe(no_mangle)]
+#[unsafe(naked)]
 pub extern "C" fn OnHardFault() {
+    core::arch::naked_asm!(
+        "mrs r0, MSPLIM",
+        "add.w r0, r0, #{room}",
+        "cmp sp, r0",
+        "bhs 2f",
+        "msr MSP, r0",
+        "2:",
+        "b {run}",
+        room = const FAULT_STACK,
+        run = sym hard_fault_run,
+    )
+}
+
+/// Stack [`OnHardFault`] makes sure of, bytes, for the safe state to run on.
+const FAULT_STACK: usize = 512;
+
+/// [`OnHardFault`]'s code, once it has a stack.
+extern "C" fn hard_fault_run() -> ! {
     unsafe { __junoos_safe_state() };
     loop {
         core::hint::spin_loop();

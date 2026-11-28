@@ -52,8 +52,9 @@
 //! whatever lies below the stack. Then it does on core 1 what
 //! [`OnReset`](crate::OnReset) does on core 0 before any other code: it
 //! enables core 1's own floating-point unit (`CPACR` is per core, like every
-//! register in the Private Peripheral Bus). Then it calls the application's
-//! function with core 1's [`Fifo`].
+//! register in the Private Peripheral Bus), and sends its exclusive accesses
+//! to the global monitor (`ACTLR.EXTEXCLALL`, also per core). Then it calls
+//! the application's function with core 1's [`Fifo`].
 //!
 //! `.data` and `.bss` are not touched again: core 0 set them up before
 //! `main`, and both cores share them.
@@ -400,9 +401,13 @@ unsafe extern "C" fn core1_start() -> ! {
 
 /// Core 1's code after `core1_start`: enables core 1's floating-point unit,
 /// as `OnReset` does on core 0 and before any floating-point instruction,
-/// then runs the application's function with core 1's [`Fifo`].
+/// makes its atomics atomic against core 0's, then runs the application's
+/// function with core 1's [`Fifo`].
 extern "C" fn core1_run() -> ! {
-    unsafe { crate::enable_fpu() };
+    unsafe {
+        crate::enable_fpu();
+        crate::enable_global_exclusives();
+    }
     let entry = CORE1_ENTRY.load(Ordering::Acquire);
     // SAFETY: `launch` stored a `fn(Fifo) -> !` here before the handshake,
     // and nothing else writes it.

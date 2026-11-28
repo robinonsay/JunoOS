@@ -175,6 +175,8 @@ SECTIONS
      * Arm's rules for how compiled functions call each other — requires the
      * stack pointer to be 8-byte aligned at every public interface. */
     .stack (NOLOAD) : ALIGN(8) {
+        /* Core 0's MSPLIM (OnReset): the lowest the stack may reach. */
+        _stack_bottom = .;
         . = . + _min_stack_size;
     } > RAM
     /DISCARD/ : { *(.ARM.exidx .ARM.exidx.*) }
